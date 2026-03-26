@@ -223,10 +223,39 @@ vim.keymap.set('n', '<C-h>', '<C-w><C-h>', { desc = 'Move focus to the left wind
 vim.keymap.set('n', '<C-l>', '<C-w><C-l>', { desc = 'Move focus to the right window' })
 vim.keymap.set('n', '<C-j>', '<C-w><C-j>', { desc = 'Move focus to the lower window' })
 vim.keymap.set('n', '<C-k>', '<C-w><C-k>', { desc = 'Move focus to the upper window' })
-vim.keymap.set('n', '<C-/>', 'gcc', { remap = true, desc = 'Toggle comment line' })
-vim.keymap.set('n', '<C-_>', 'gcc', { remap = true, desc = 'Toggle comment line' })
-vim.keymap.set('x', '<C-/>', 'gc', { remap = true, desc = 'Toggle comment selection' })
-vim.keymap.set('x', '<C-_>', 'gc', { remap = true, desc = 'Toggle comment selection' })
+if vim.g.vscode then
+  local ok, vscode = pcall(require, 'vscode')
+  if ok then
+    local vscode_comment_line = function() vscode.action 'editor.action.commentLine' end
+    local vscode_comment_selection = function()
+      local start_line = vim.fn.line("'<") - 1
+      local end_line = vim.fn.line("'>") - 1
+      if start_line < 0 or end_line < 0 then return end
+      if start_line > end_line then
+        start_line, end_line = end_line, start_line
+      end
+      vscode.action('editor.action.commentLine', { range = { start_line, end_line } })
+    end
+
+    vim.keymap.set('n', '<C-/>', vscode_comment_line, { desc = 'VSCode toggle line comment' })
+    vim.keymap.set('n', '<C-_>', vscode_comment_line, { desc = 'VSCode toggle line comment' })
+    vim.keymap.set('x', '<C-/>', vscode_comment_selection, { desc = 'VSCode toggle selected comments' })
+    vim.keymap.set('x', '<C-_>', vscode_comment_selection, { desc = 'VSCode toggle selected comments' })
+
+    -- VSCode replacements for common Telescope workflows
+    vim.keymap.set('n', '<leader>/', function() vscode.action 'actions.find' end, { desc = '[/] Find in current buffer (VSCode)' })
+    vim.keymap.set('n', '<leader>sf', function() vscode.action 'fzf-quick-open.runFzfSearch' end, { desc = '[S]earch with [F]zf rg' })
+    vim.keymap.set('n', '<leader>sg', function() vscode.action 'fzf-quick-open.runFzfSearch' end, { desc = '[S]earch by [G]rep (fzf)' })
+    vim.keymap.set('n', '<leader>sw', function() vscode.action 'fzf-quick-open.runFzfSearch' end, { desc = '[S]earch current [W]ord (fzf)' })
+    vim.keymap.set('n', '<C-p>', function() vscode.action 'fzf-quick-open.runFzfFile' end, { desc = 'Quick open files (fzf)' })
+    vim.keymap.set('n', '<C-S-p>', function() vscode.action 'workbench.action.showCommands' end, { desc = 'Open command palette (VSCode)' })
+  end
+else
+  vim.keymap.set('n', '<C-/>', 'gcc', { remap = true, desc = 'Toggle comment line' })
+  vim.keymap.set('n', '<C-_>', 'gcc', { remap = true, desc = 'Toggle comment line' })
+  vim.keymap.set('x', '<C-/>', 'gc', { remap = true, desc = 'Toggle comment selection' })
+  vim.keymap.set('x', '<C-_>', 'gc', { remap = true, desc = 'Toggle comment selection' })
+end
 
 -- NOTE: Some terminals have colliding keymaps or are not able to send distinct keycodes
 -- vim.keymap.set("n", "<C-S-h>", "<C-w>H", { desc = "Move window to the left" })
@@ -245,6 +274,10 @@ vim.api.nvim_create_autocmd('TextYankPost', {
   group = vim.api.nvim_create_augroup('kickstart-highlight-yank', { clear = true }),
   callback = function() vim.hl.on_yank() end,
 })
+
+-- VSCode Neovim compatibility mode: keep core options/keymaps above,
+-- skip lazy.nvim/plugin loading below to avoid UI/plugin conflicts.
+if vim.g.vscode then return end
 
 -- [[ Install `lazy.nvim` plugin manager ]]
 --    See `:help lazy.nvim.txt` or https://github.com/folke/lazy.nvim for more info
