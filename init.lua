@@ -164,6 +164,18 @@ vim.o.scrolloff = 10
 -- See `:help 'confirm'`
 vim.o.confirm = true
 
+-- Use PowerShell 7 as Neovim's shell on Windows.
+if vim.fn.has 'win32' == 1 then
+  if vim.fn.executable 'pwsh' == 1 then
+    vim.opt.shell = 'pwsh'
+    vim.opt.shellcmdflag = "-NoLogo -NoProfile -ExecutionPolicy RemoteSigned -Command [Console]::InputEncoding=[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $PSStyle.OutputRendering='PlainText';"
+    vim.opt.shellredir = '2>&1 | Out-File -Encoding utf8 %s; exit $LastExitCode'
+    vim.opt.shellpipe = '2>&1 | Out-File -Encoding utf8 %s; exit $LastExitCode'
+    vim.opt.shellquote = ''
+    vim.opt.shellxquote = ''
+  end
+end
+
 -- [[ Basic Keymaps ]]
 --  See `:help vim.keymap.set()`
 
@@ -211,6 +223,10 @@ vim.keymap.set('n', '<C-h>', '<C-w><C-h>', { desc = 'Move focus to the left wind
 vim.keymap.set('n', '<C-l>', '<C-w><C-l>', { desc = 'Move focus to the right window' })
 vim.keymap.set('n', '<C-j>', '<C-w><C-j>', { desc = 'Move focus to the lower window' })
 vim.keymap.set('n', '<C-k>', '<C-w><C-k>', { desc = 'Move focus to the upper window' })
+vim.keymap.set('n', '<C-/>', 'gcc', { remap = true, desc = 'Toggle comment line' })
+vim.keymap.set('n', '<C-_>', 'gcc', { remap = true, desc = 'Toggle comment line' })
+vim.keymap.set('x', '<C-/>', 'gc', { remap = true, desc = 'Toggle comment selection' })
+vim.keymap.set('x', '<C-_>', 'gc', { remap = true, desc = 'Toggle comment selection' })
 
 -- NOTE: Some terminals have colliding keymaps or are not able to send distinct keycodes
 -- vim.keymap.set("n", "<C-S-h>", "<C-w>H", { desc = "Move window to the left" })
@@ -600,9 +616,15 @@ require('lazy').setup({
       --  See `:help lsp-config` for information about keys and how to configure
       ---@type table<string, vim.lsp.Config>
       local servers = {
-        -- clangd = {},
+        clangd = {},
+        bashls = {},
+        cssls = {},
+        html = {},
+        jsonls = {},
+        pyright = {},
+        ts_ls = {},
+        powershell_es = {},
         -- gopls = {},
-        -- pyright = {},
         -- rust_analyzer = {},
         --
         -- Some languages (like typescript) have entire language plugins that can be useful:
@@ -760,7 +782,21 @@ require('lazy').setup({
         -- <c-k>: Toggle signature help
         --
         -- See :h blink-cmp-config-keymap for defining your own keymap
-        preset = 'default',
+        preset = 'super-tab',
+        ['<Tab>'] = {
+          function(cmp)
+            local col = vim.fn.col '.' - 1
+            local line = vim.api.nvim_get_current_line()
+            local prev_char = col > 0 and line:sub(col, col) or ''
+
+            -- Keep normal indentation behavior when not completing a word.
+            if col == 0 or prev_char:match '%s' then return false end
+
+            return cmp.select_and_accept() or cmp.show_and_insert_or_accept_single()
+          end,
+          'snippet_forward',
+          'fallback',
+        },
 
         -- For more advanced Luasnip keymaps (e.g. selecting choice nodes, expansion) see:
         --    https://github.com/L3MON4D3/LuaSnip?tab=readme-ov-file#keymaps
@@ -773,6 +809,15 @@ require('lazy').setup({
       },
 
       completion = {
+        menu = {
+          auto_show = false,
+        },
+        list = {
+          selection = {
+            preselect = false,
+            auto_insert = false,
+          },
+        },
         -- By default, you may press `<c-space>` to show the documentation.
         -- Optionally, set `auto_show = true` to show the documentation after a delay.
         documentation = { auto_show = false, auto_show_delay_ms = 500 },
@@ -791,7 +836,7 @@ require('lazy').setup({
       -- the rust implementation via `'prefer_rust_with_warning'`
       --
       -- See :h blink-cmp-config-fuzzy for more information
-      fuzzy = { implementation = 'lua' },
+      fuzzy = { implementation = 'prefer_rust_with_warning' },
 
       -- Shows a signature help window while you type arguments for a function
       signature = { enabled = true },
