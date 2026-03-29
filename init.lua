@@ -164,11 +164,18 @@ vim.o.scrolloff = 10
 -- See `:help 'confirm'`
 vim.o.confirm = true
 
--- Use PowerShell 7 as Neovim's shell on Windows.
+-- Prefer PowerShell for :! and other shell-backed commands on Windows.
 if vim.fn.has 'win32' == 1 then
+  local ps_shell = ''
   if vim.fn.executable 'pwsh' == 1 then
-    vim.opt.shell = 'pwsh'
-    vim.opt.shellcmdflag = "-NoLogo -NoProfile -ExecutionPolicy RemoteSigned -Command [Console]::InputEncoding=[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $PSStyle.OutputRendering='PlainText';"
+    ps_shell = 'pwsh'
+  elseif vim.fn.executable 'powershell' == 1 then
+    ps_shell = 'powershell'
+  end
+
+  if ps_shell ~= '' then
+    vim.opt.shell = ps_shell
+    vim.opt.shellcmdflag = "-NoLogo -ExecutionPolicy RemoteSigned -Command [Console]::InputEncoding=[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $PSStyle.OutputRendering='PlainText';"
     vim.opt.shellredir = '2>&1 | Out-File -Encoding utf8 %s; exit $LastExitCode'
     vim.opt.shellpipe = '2>&1 | Out-File -Encoding utf8 %s; exit $LastExitCode'
     vim.opt.shellquote = ''
@@ -273,6 +280,18 @@ vim.api.nvim_create_autocmd('TextYankPost', {
   desc = 'Highlight when yanking (copying) text',
   group = vim.api.nvim_create_augroup('kickstart-highlight-yank', { clear = true }),
   callback = function() vim.hl.on_yank() end,
+})
+
+vim.api.nvim_create_autocmd('FileType', {
+  desc = 'Use 4-space indentation for C-family files',
+  group = vim.api.nvim_create_augroup('kickstart-c-indent', { clear = true }),
+  pattern = { 'c', 'cpp', 'objc', 'objcpp' },
+  callback = function()
+    vim.opt_local.tabstop = 4
+    vim.opt_local.shiftwidth = 4
+    vim.opt_local.softtabstop = 4
+    vim.opt_local.expandtab = true
+  end,
 })
 
 -- VSCode Neovim compatibility mode: keep core options/keymaps above,
@@ -649,7 +668,12 @@ require('lazy').setup({
       --  See `:help lsp-config` for information about keys and how to configure
       ---@type table<string, vim.lsp.Config>
       local servers = {
-        clangd = {},
+        clangd = {
+          init_options = {
+            -- Use modern C++ when no compile_commands.json is available.
+            fallbackFlags = { '-std=c++20' },
+          },
+        },
         bashls = {},
         cssls = {},
         html = {},
