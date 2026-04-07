@@ -122,6 +122,18 @@ vim.o.breakindent = true
 -- Enable undo/redo changes even after closing and reopening a file
 vim.o.undofile = true
 
+-- Use a config-local ShaDa path on Windows and clear stale temp files.
+if vim.fn.has 'win32' == 1 then
+  local shada_dir = vim.fn.stdpath 'config' .. '/shada'
+  vim.fn.mkdir(shada_dir, 'p')
+  vim.opt.shadafile = shada_dir .. '/main.shada'
+
+  local shada_tmp_files = vim.fn.glob(shada_dir .. '/main.shada.tmp.*', false, true)
+  for _, path in ipairs(shada_tmp_files) do
+    pcall(vim.fn.delete, path)
+  end
+end
+
 -- Case-insensitive searching UNLESS \C or one or more capital letters in the search term
 vim.o.ignorecase = true
 vim.o.smartcase = true
@@ -230,6 +242,8 @@ vim.keymap.set('n', '<C-h>', '<C-w><C-h>', { desc = 'Move focus to the left wind
 vim.keymap.set('n', '<C-l>', '<C-w><C-l>', { desc = 'Move focus to the right window' })
 vim.keymap.set('n', '<C-j>', '<C-w><C-j>', { desc = 'Move focus to the lower window' })
 vim.keymap.set('n', '<C-k>', '<C-w><C-k>', { desc = 'Move focus to the upper window' })
+-- Fallback for terminals that capture <C-v> as paste before Neovim sees it.
+vim.keymap.set({ 'n', 'x' }, '<C-q>', '<C-v>', { desc = 'Visual block mode' })
 if vim.g.vscode then
   local ok, vscode = pcall(require, 'vscode')
   if ok then
