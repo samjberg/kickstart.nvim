@@ -706,9 +706,29 @@ require('lazy').setup({
       ---@type table<string, vim.lsp.Config>
       local servers = {
         clangd = {
+          cmd = (function()
+            if vim.fn.has 'win32' ~= 1 or not vim.uv.fs_stat 'C:/msys64/mingw64/bin/g++.exe' then return nil end
+            local mason_clangd = vim.fn.stdpath 'data' .. '/mason/bin/clangd.cmd'
+            local clangd_bin = vim.uv.fs_stat(mason_clangd) and mason_clangd or 'clangd'
+            return { clangd_bin, '--query-driver=C:/msys64/mingw64/bin/*' }
+          end)(),
           init_options = {
             -- Use modern C++ when no compile_commands.json is available.
-            fallbackFlags = { '-std=c++20' },
+            fallbackFlags = (function()
+              local flags = { '-std=c++20' }
+              if vim.fn.has 'win32' == 1 and vim.uv.fs_stat 'C:/msys64/mingw64' then
+                -- Make clangd fallback parse with the MinGW target/sysroot.
+                vim.list_extend(flags, {
+                  '--target=x86_64-w64-windows-gnu',
+                  '--sysroot=C:/msys64/mingw64',
+                })
+              end
+              if vim.fn.has 'win32' == 1 and vim.uv.fs_stat 'C:/msys64/mingw64/include/ncurses' then
+                -- Support projects that include <ncurses.h> directly.
+                vim.list_extend(flags, { '-isystem', 'C:/msys64/mingw64/include/ncurses' })
+              end
+              return flags
+            end)(),
           },
         },
         bashls = {},
@@ -717,7 +737,11 @@ require('lazy').setup({
         jsonls = {},
         pyright = {},
         ts_ls = {},
-        powershell_es = {},
+        powershell_es = {
+          -- mason-lspconfig currently derives this from $MASON; if that env var
+          -- is unset on Windows, the server command can become "nil/...".
+          bundle_path = vim.fn.stdpath 'data' .. '/mason/packages/powershell-editor-services',
+        },
         -- gopls = {},
         -- rust_analyzer = {},
         --
@@ -1010,31 +1034,261 @@ require('lazy').setup({
     'nvim-treesitter/nvim-treesitter',
     lazy = false,
     build = ':TSUpdate',
-    branch = 'main',
-    -- [[ Configure Treesitter ]] See `:help nvim-treesitter-intro`
     config = function()
-      local parsers = { 'bash', 'c', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc' }
-      require('nvim-treesitter').install(parsers)
+      local ok, configs = pcall(require, 'nvim-treesitter.configs')
+      if not ok then return end
+
+      -- Install parsers into a known, writable dir and add it to rtp
+      local parser_install_dir = vim.fn.stdpath('data') .. '/parsers'
+      pcall(vim.fn.mkdir, parser_install_dir, 'p')
+      if not string.find(vim.o.runtimepath, parser_install_dir, 1, true) then
+        vim.opt.runtimepath:append(parser_install_dir)
+      end
+
+      -- Prefer common macOS compilers for building parsers
+      pcall(function()
+        local install = require 'nvim-treesitter.install'
+        install.compilers = { 'clang', 'cc', 'gcc' }
+        install.prefer_git = true
+      end)
+
+      configs.setup {
+        ensure_installed = { 'bash', 'c', 'cpp', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc' },
+        parser_install_dir = parser_install_dir,
+        auto_install = true,
+        sync_install = false,
+        highlight = { enable = true },
+        indent = { enable = true },
+      }
+
+      -- If cpp/c filetype opens without a parser, attempt install on the fly
       vim.api.nvim_create_autocmd('FileType', {
+        pattern = { 'c', 'cpp' },
         callback = function(args)
-          local buf, filetype = args.buf, args.match
-
-          local language = vim.treesitter.language.get_lang(filetype)
-          if not language then return end
-
-          -- check if parser exists and load it
-          if not vim.treesitter.language.add(language) then return end
-          -- enables syntax highlighting and other treesitter features
-          vim.treesitter.start(buf, language)
-
-          -- enables treesitter based folds
-          -- for more info on folds see `:help folds`
-          -- vim.wo.foldexpr = 'v:lua.vim.treesitter.foldexpr()'
-          -- vim.wo.foldmethod = 'expr'
-
-          -- enables treesitter based indentation
-          vim.bo.indentexpr = "v:lua.require'nvim-treesitter'.indentexpr()"
+          local lang = vim.treesitter.language.get_lang(args.match)
+          if not lang then return end
+          local added = pcall(vim.treesitter.language.add, lang)
+          if not added then
+            vim.schedule(function()
+              vim.cmd('silent! TSInstallSync ' .. lang)
+              pcall(vim.treesitter.language.add, lang)
+            end)
+          end
         end,
+      })
+    end,
+  },
+
+  { -- Treesitter-powered function/class motions like ]m/[m/]]/[[
+    'nvim-treesitter/nvim-treesitter-textobjects',
+    lazy = false,
+    dependencies = { 'nvim-treesitter/nvim-treesitter' },
+    keys = { ']m', ']M', '[m', '[M', ']]', '][', '[[', '[]' },
+    config = function()
+      -- Only enable the movement module to avoid conflicting with
+      -- selection textobjects provided by other plugins (e.g. mini.ai).
+      local ok, configs = pcall(require, 'nvim-treesitter.configs')
+      if not ok then return end
+      configs.setup {
+        textobjects = {
+          move = {
+            enable = true,
+            set_jumps = true, -- record in the jumplist
+            goto_next_start = {
+              [']m'] = '@function.outer',
+              [']]'] = '@class.outer',
+            },
+            goto_next_end = {
+              [']M'] = '@function.outer',
+              [']['] = '@class.outer',
+            },
+            goto_previous_start = {
+              ['[m'] = '@function.outer',
+              ['[['] = '@class.outer',
+            },
+            goto_previous_end = {
+              ['[M'] = '@function.outer',
+              ['[]'] = '@class.outer',
+            },
+          },
+        },
+      }
+
+      -- Also map directly to movement functions to guarantee presence.
+      local ok_move, move = pcall(require, 'nvim-treesitter.textobjects.move')
+      if ok_move then
+        local function moved_after(f)
+          local before = vim.api.nvim_win_get_cursor(0)
+          f()
+          local after = vim.api.nvim_win_get_cursor(0)
+          return after[1] ~= before[1] or after[2] ~= before[2]
+        end
+        local map = function(lhs, fn)
+          vim.keymap.set({ 'n', 'x', 'o' }, lhs, fn, { silent = true, desc = 'TS move ' .. lhs })
+        end
+        -- Try function first; if no movement, try method (C++)
+        map(']m', function()
+          if not moved_after(function() move.goto_next_start('@function.outer') end) then
+            moved_after(function() move.goto_next_start('@method.outer') end)
+          end
+        end)
+        map(']M', function()
+          if not moved_after(function() move.goto_next_end('@function.outer') end) then
+            moved_after(function() move.goto_next_end('@method.outer') end)
+          end
+        end)
+        map('[m', function()
+          if not moved_after(function() move.goto_previous_start('@function.outer') end) then
+            moved_after(function() move.goto_previous_start('@method.outer') end)
+          end
+        end)
+        map('[M', function()
+          if not moved_after(function() move.goto_previous_end('@function.outer') end) then
+            moved_after(function() move.goto_previous_end('@method.outer') end)
+          end
+        end)
+        map(']]', function() move.goto_next_start('@class.outer') end)
+        map('][', function() move.goto_next_end('@class.outer') end)
+        map('[[', function() move.goto_previous_start('@class.outer') end)
+        map('[]', function() move.goto_previous_end('@class.outer') end)
+      end
+
+      -- If cpp textobject query is missing the captures we need, inject a minimal one.
+      do
+        local okq, q = pcall(function() return vim.treesitter.query.get('cpp', 'textobjects') end)
+        local have_caps = false
+        if okq and q and q.captures then
+          for _, c in ipairs(q.captures) do
+            if c == 'function.outer' or c == 'class.outer' then have_caps = true break end
+          end
+        end
+        if not have_caps then
+          local minimal = [[
+            ;; minimal C++ textobjects for motions
+            (function_definition) @function.outer
+            (class_specifier) @class.outer
+            (struct_specifier) @class.outer
+          ]]
+          pcall(vim.treesitter.query.set, 'cpp', 'textobjects', minimal)
+        end
+      end
+
+      -- Debug helper: :TSMotionsCheck
+      vim.api.nvim_create_user_command('TSMotionsCheck', function()
+        local ft = vim.bo.filetype
+        local has = require('nvim-treesitter.parsers').has_parser(ft)
+        local okq, q = pcall(function() return vim.treesitter.query.get(ft, 'textobjects') end)
+        local caps = {}
+        if okq and q and q.captures then
+          for _, c in ipairs(q.captures) do caps[c] = true end
+        end
+        vim.notify(table.concat({
+          'filetype: ' .. ft,
+          'has_parser: ' .. tostring(has),
+          'query_loaded: ' .. tostring(okq and q ~= nil),
+          'captures: function.outer=' .. tostring(caps['function.outer'] or false)
+            .. ', method.outer=' .. tostring(caps['method.outer'] or false)
+            .. ', class.outer=' .. tostring(caps['class.outer'] or false),
+        }, '\n'))
+      end, {})
+    end,
+  },
+
+  { -- C/C++ Treesitter motions independent of textobjects
+    'nvim-treesitter/nvim-treesitter',
+    name = 'treesitter-cpp-motions',
+    lazy = false,
+    config = function()
+      local function collect_nodes(bufnr, lang, group)
+        local qstr
+        if lang == 'c' then
+          if group == 'func' then
+            qstr = [[ (function_definition) @obj ]]
+          else
+            qstr = [[ (struct_specifier) @obj (union_specifier) @obj ]]
+          end
+        else
+          if group == 'func' then
+            qstr = [[ (function_definition) @obj ]]
+          else
+            qstr = [[ (class_specifier) @obj (struct_specifier) @obj ]]
+          end
+        end
+        local okp, parser = pcall(vim.treesitter.get_parser, bufnr, lang)
+        if not okp or not parser then return {} end
+        local trees = parser:parse()
+        local tree = trees and trees[1]
+        if not tree then return {} end
+        local root = tree:root()
+        local query = vim.treesitter.query.parse(lang, qstr)
+        local nodes = {}
+        for id, node in query:iter_captures(root, bufnr, 0, -1) do
+          if query.captures[id] == 'obj' then
+            local sr, sc, er, ec = node:range()
+            nodes[#nodes + 1] = { sr = sr, sc = sc, er = er, ec = ec }
+          end
+        end
+        table.sort(nodes, function(a, b)
+          if a.sr == b.sr then return a.sc < b.sc end
+          return a.sr < b.sr
+        end)
+        return nodes
+      end
+
+      local function to_line_start(r)
+        vim.api.nvim_win_set_cursor(0, { r + 1, 0 })
+      end
+
+      local function to_line_end_of_closing_brace(r)
+        local line = vim.api.nvim_buf_get_lines(0, r, r + 1, false)[1] or ''
+        local col = (line:find('}', 1, true) or (#line + 1)) - 1
+        vim.api.nvim_win_set_cursor(0, { r + 1, col })
+      end
+
+      local function jump(group, to_end, forward)
+        local ft = vim.bo.filetype
+        local lang = (ft == 'c') and 'c' or 'cpp'
+        local nodes = collect_nodes(0, lang, group)
+        if #nodes == 0 then return end
+        local cur = vim.api.nvim_win_get_cursor(0)
+        local cr, cc = cur[1] - 1, cur[2]
+        local target
+        if forward then
+          for _, n in ipairs(nodes) do
+            local r, c = (to_end and n.er or n.sr), (to_end and n.ec or n.sc)
+            if r > cr or (r == cr and c > cc) then target = n break end
+          end
+          target = target or nodes[#nodes]
+        else
+          for i = #nodes, 1, -1 do
+            local n = nodes[i]
+            local r, c = (to_end and n.er or n.sr), (to_end and n.ec or n.sc)
+            if r < cr or (r == cr and c < cc) then target = n break end
+          end
+          target = target or nodes[1]
+        end
+        if not target then return end
+        if to_end then to_line_end_of_closing_brace(target.er) else to_line_start(target.sr) end
+      end
+
+      local function set_maps(bufnr)
+        local map = function(lhs, fn, desc)
+          vim.keymap.set({ 'n', 'x', 'o' }, lhs, fn, { buffer = bufnr, silent = true, desc = desc })
+        end
+        map(']m', function() jump('func', false, true) end, 'C/C++ TS: next function start')
+        map(']M', function() jump('func', true,  true) end, 'C/C++ TS: next function end')
+        map('[m', function() jump('func', false, false) end, 'C/C++ TS: prev function start')
+        map('[M', function() jump('func', true,  false) end, 'C/C++ TS: prev function end')
+        map(']]', function() jump('class', false, true) end, 'C/C++ TS: next class/struct start')
+        map('][', function() jump('class', true,  true) end, 'C/C++ TS: next class/struct end')
+        map('[[', function() jump('class', false, false) end, 'C/C++ TS: prev class/struct start')
+        map('[]', function() jump('class', true,  false) end, 'C/C++ TS: prev class/struct end')
+      end
+
+      vim.api.nvim_create_autocmd('FileType', {
+        group = vim.api.nvim_create_augroup('cpp-ts-motions', { clear = true }),
+        pattern = { 'c', 'cpp', 'objc', 'objcpp' },
+        callback = function(args) set_maps(args.buf) end,
       })
     end,
   },

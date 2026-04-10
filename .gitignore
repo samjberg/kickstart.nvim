@@ -13,3 +13,4 @@ shada/main.shada
 lazy-lock.json
 
 .DS_Store
+/.remote-xcode-server/
