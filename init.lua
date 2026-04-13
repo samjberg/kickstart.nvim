@@ -727,6 +727,16 @@ require('lazy').setup({
                 -- Support projects that include <ncurses.h> directly.
                 vim.list_extend(flags, { '-isystem', 'C:/msys64/mingw64/include/ncurses' })
               end
+              -- Pick up Python/pybind11 headers for projects without compile_commands.json
+              -- (e.g. setuptools/pybind11 builds).
+              local pybind_includes = vim.fn.systemlist 'python -m pybind11 --includes'
+              if vim.v.shell_error == 0 then
+                for _, line in ipairs(pybind_includes) do
+                  for inc in string.gmatch(line, '%-I(%S+)') do
+                    vim.list_extend(flags, { '-isystem', inc })
+                  end
+                end
+              end
               return flags
             end)(),
           },
