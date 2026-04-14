@@ -1268,14 +1268,12 @@ require('lazy').setup({
             local r, c = (to_end and n.er or n.sr), (to_end and n.ec or n.sc)
             if r > cr or (r == cr and c > cc) then target = n break end
           end
-          target = target or nodes[#nodes]
         else
           for i = #nodes, 1, -1 do
             local n = nodes[i]
             local r, c = (to_end and n.er or n.sr), (to_end and n.ec or n.sc)
             if r < cr or (r == cr and c < cc) then target = n break end
           end
-          target = target or nodes[1]
         end
         if not target then return end
         if to_end then to_line_end_of_closing_brace(target.er) else to_line_start(target.sr) end
