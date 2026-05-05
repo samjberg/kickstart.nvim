@@ -90,6 +90,41 @@ P.S. You can delete this when you're done too. It's your config now! :)
 vim.g.mapleader = ' '
 vim.g.maplocalleader = ' '
 
+-- Ensure critical Windows tooling remains discoverable even if Neovim inherits
+-- a reduced PATH (for example from GUI apps or VS Code host processes).
+if vim.fn.has 'win32' == 1 then
+  local function path_entries()
+    local entries = {}
+    for entry in string.gmatch(vim.env.PATH or '', '[^;]+') do
+      entries[#entries + 1] = entry:gsub('[\\/]+$', '')
+    end
+    return entries
+  end
+
+  local function path_contains(dir)
+    local norm = dir:gsub('[\\/]+$', ''):lower()
+    for _, entry in ipairs(path_entries()) do
+      if entry:lower() == norm then return true end
+    end
+    return false
+  end
+
+  local function append_to_path_if_present(dir)
+    if vim.uv.fs_stat(dir) and not path_contains(dir) then vim.env.PATH = (vim.env.PATH or '') .. ';' .. dir end
+  end
+
+  local user = vim.env.USERNAME or ''
+  if vim.fn.executable 'git' == 0 then
+    append_to_path_if_present 'C:\\Program Files\\Git\\cmd'
+    append_to_path_if_present 'C:\\Program Files\\Git\\usr\\bin'
+  end
+  if vim.fn.executable 'pwsh' == 0 then
+    append_to_path_if_present 'C:\\Program Files\\WindowsApps\\Microsoft.PowerShell_7.6.0.0_x64__8wekyb3d8bbwe'
+    append_to_path_if_present('C:\\Users\\' .. user .. '\\AppData\\Local\\Microsoft\\WindowsApps')
+    append_to_path_if_present 'C:\\Program Files\\PowerShell\\7'
+  end
+end
+
 -- Set to true if you have a Nerd Font installed and selected in the terminal
 vim.g.have_nerd_font = false
 
@@ -102,7 +137,7 @@ vim.g.have_nerd_font = false
 vim.o.number = true
 -- You can also add relative line numbers, to help with jumping.
 --  Experiment for yourself to see if you like it!
--- vim.o.relativenumber = true
+vim.o.relativenumber = true
 
 -- Enable mouse mode, can be useful for resizing splits for example!
 vim.o.mouse = 'a'
@@ -187,7 +222,8 @@ if vim.fn.has 'win32' == 1 then
 
   if ps_shell ~= '' then
     vim.opt.shell = ps_shell
-    vim.opt.shellcmdflag = "-NoLogo -ExecutionPolicy RemoteSigned -Command [Console]::InputEncoding=[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $PSStyle.OutputRendering='PlainText';"
+    vim.opt.shellcmdflag =
+      "-NoLogo -ExecutionPolicy RemoteSigned -Command [Console]::InputEncoding=[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $PSStyle.OutputRendering='PlainText';"
     vim.opt.shellredir = '2>&1 | Out-File -Encoding utf8 %s; exit $LastExitCode'
     vim.opt.shellpipe = '2>&1 | Out-File -Encoding utf8 %s; exit $LastExitCode'
     vim.opt.shellquote = ''
@@ -201,6 +237,9 @@ end
 -- Clear highlights on search when pressing <Esc> in normal mode
 --  See `:help hlsearch`
 vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
+
+-- Copy filepath to yank register (which is also system clipboard in current setup)
+vim.keymap.set('n', '<leader>fp', ':let @+ = expand("%:p")<CR>', { desc = 'Copy file path' })
 
 -- Diagnostic Config & Keymaps
 -- See :help vim.diagnostic.Opts
@@ -249,8 +288,8 @@ if vim.g.vscode then
   if ok then
     local vscode_comment_line = function() vscode.action 'editor.action.commentLine' end
     local vscode_comment_selection = function()
-      local start_line = vim.fn.line("'<") - 1
-      local end_line = vim.fn.line("'>") - 1
+      local start_line = vim.fn.line "'<" - 1
+      local end_line = vim.fn.line "'>" - 1
       if start_line < 0 or end_line < 0 then return end
       if start_line > end_line then
         start_line, end_line = end_line, start_line
@@ -338,7 +377,13 @@ rtp:prepend(lazypath)
 -- NOTE: Here is where you install your plugins.
 require('lazy').setup({
   -- NOTE: Plugins can be added via a link or github org/name. To run setup automatically, use `opts = {}`
-  { 'NMAC427/guess-indent.nvim', opts = {} },
+  {
+    'NMAC427/guess-indent.nvim',
+    opts = {
+      -- Keep C/C++ indentation fixed to our FileType autocmd defaults.
+      filetype_exclude = { 'c', 'cpp', 'objc', 'objcpp' },
+    },
+  },
 
   -- Alternatively, use `config = function() ... end` for full control over the configuration.
   -- If you prefer to call `setup` explicitly, use:
@@ -371,9 +416,7 @@ require('lazy').setup({
       on_attach = function(bufnr)
         local gitsigns = require 'gitsigns'
 
-        local function map(mode, lhs, rhs, desc)
-          vim.keymap.set(mode, lhs, rhs, { buffer = bufnr, desc = desc })
-        end
+        local function map(mode, lhs, rhs, desc) vim.keymap.set(mode, lhs, rhs, { buffer = bufnr, desc = desc }) end
 
         map('n', ']c', function()
           if vim.wo.diff then
@@ -922,9 +965,11 @@ require('lazy').setup({
 
             return cmp.select_and_accept() or cmp.show_and_insert_or_accept_single()
           end,
-          'snippet_forward',
           'fallback',
         },
+        -- Keep snippet placeholder navigation off <Tab> to avoid accidental jumps.
+        ['<C-l>'] = { 'snippet_forward', 'fallback' },
+        ['<C-j>'] = { 'snippet_backward', 'fallback' },
 
         -- For more advanced Luasnip keymaps (e.g. selecting choice nodes, expansion) see:
         --    https://github.com/L3MON4D3/LuaSnip?tab=readme-ov-file#keymaps
@@ -953,6 +998,27 @@ require('lazy').setup({
 
       sources = {
         default = { 'lsp', 'path', 'snippets' },
+        per_filetype = {
+          -- Pyright can return weak results while a list expression is still
+          -- syntactically incomplete; keep cheap local words available in Python.
+          python = { 'lsp', 'path', 'snippets', 'buffer' },
+        },
+        providers = {
+          lsp = {
+            -- Let Python's buffer source show alongside LSP items instead of
+            -- only after the LSP returns no candidates.
+            fallbacks = function(ctx)
+              if vim.bo[ctx.bufnr].filetype == 'python' then return {} end
+              return { 'buffer' }
+            end,
+          },
+          buffer = {
+            opts = {
+              -- Keep the Python fallback fast and predictable.
+              get_bufnrs = function() return { vim.api.nvim_get_current_buf() } end,
+            },
+          },
+        },
       },
 
       snippets = { preset = 'luasnip' },
@@ -989,7 +1055,50 @@ require('lazy').setup({
       -- Load the colorscheme here.
       -- Like many other themes, this one has different styles, and you could load
       -- any other, such as 'tokyonight-storm', 'tokyonight-moon', or 'tokyonight-day'.
-      vim.cmd.colorscheme 'tokyonight-night'
+      -- vim.cmd.colorscheme 'tokyonight-night'
+    end,
+  },
+
+  {
+    'catppuccin/nvim',
+    name = 'catppuccin',
+    -- lazy = false,
+    priority = 1001,
+    -- config = function() vim.cmd.colorscheme 'catppuccin-mocha' end,
+  },
+  {
+    'scottmckendry/cyberdream.nvim',
+    name = 'cyberdream',
+    -- lazy = false,
+    priority = 1002,
+    -- config = function() vim.cmd.colorscheme 'cyberdream' end,
+  },
+  {
+    'rebelot/kanagawa.nvim',
+    name = 'kanagawa',
+    -- lazy = false,
+    priority = 1002,
+    config = function()
+      require('kanagawa').setup {
+        theme = 'dragon',
+        overrides = function(colors)
+          return {
+            Visual = { bg = colors.palette.winterYellow, fg = colors.palette.sumiInk0 },
+          }
+        end,
+      }
+      vim.cmd 'colorscheme kanagawa'
+    end,
+  },
+  {
+    'EdenEast/nightfox.nvim',
+    name = 'nightfox',
+    priority = 1002,
+    config = function()
+      require('nightfox').setup {
+        theme = 'carbonfox',
+      }
+      -- vim.cmd 'colorscheme carbonfox'
     end,
   },
 
@@ -1049,11 +1158,9 @@ require('lazy').setup({
       if not ok then return end
 
       -- Install parsers into a known, writable dir and add it to rtp
-      local parser_install_dir = vim.fn.stdpath('data') .. '/parsers'
+      local parser_install_dir = vim.fn.stdpath 'data' .. '/parsers'
       pcall(vim.fn.mkdir, parser_install_dir, 'p')
-      if not string.find(vim.o.runtimepath, parser_install_dir, 1, true) then
-        vim.opt.runtimepath:append(parser_install_dir)
-      end
+      if not string.find(vim.o.runtimepath, parser_install_dir, 1, true) then vim.opt.runtimepath:append(parser_install_dir) end
 
       -- Prefer common macOS compilers for building parsers
       pcall(function()
@@ -1063,12 +1170,17 @@ require('lazy').setup({
       end)
 
       configs.setup {
-        ensure_installed = { 'bash', 'c', 'cpp', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc' },
+        ensure_installed = { 'bash', 'c', 'cpp', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'python', 'query', 'vim', 'vimdoc' },
         parser_install_dir = parser_install_dir,
         auto_install = true,
         sync_install = false,
         highlight = { enable = true },
-        indent = { enable = true },
+        indent = {
+          enable = true,
+          -- Python's built-in indent is cheaper and handles incomplete list
+          -- comprehensions more predictably while typing.
+          disable = { 'python' },
+        },
       }
 
       -- If cpp/c filetype opens without a parser, attempt install on the fly
@@ -1133,34 +1245,28 @@ require('lazy').setup({
           local after = vim.api.nvim_win_get_cursor(0)
           return after[1] ~= before[1] or after[2] ~= before[2]
         end
-        local map = function(lhs, fn)
-          vim.keymap.set({ 'n', 'x', 'o' }, lhs, fn, { silent = true, desc = 'TS move ' .. lhs })
-        end
+        local map = function(lhs, fn) vim.keymap.set({ 'n', 'x', 'o' }, lhs, fn, { silent = true, desc = 'TS move ' .. lhs }) end
         -- Try function first; if no movement, try method (C++)
         map(']m', function()
-          if not moved_after(function() move.goto_next_start('@function.outer') end) then
-            moved_after(function() move.goto_next_start('@method.outer') end)
-          end
+          if not moved_after(function() move.goto_next_start '@function.outer' end) then moved_after(function() move.goto_next_start '@method.outer' end) end
         end)
         map(']M', function()
-          if not moved_after(function() move.goto_next_end('@function.outer') end) then
-            moved_after(function() move.goto_next_end('@method.outer') end)
-          end
+          if not moved_after(function() move.goto_next_end '@function.outer' end) then moved_after(function() move.goto_next_end '@method.outer' end) end
         end)
         map('[m', function()
-          if not moved_after(function() move.goto_previous_start('@function.outer') end) then
-            moved_after(function() move.goto_previous_start('@method.outer') end)
+          if not moved_after(function() move.goto_previous_start '@function.outer' end) then
+            moved_after(function() move.goto_previous_start '@method.outer' end)
           end
         end)
         map('[M', function()
-          if not moved_after(function() move.goto_previous_end('@function.outer') end) then
-            moved_after(function() move.goto_previous_end('@method.outer') end)
+          if not moved_after(function() move.goto_previous_end '@function.outer' end) then
+            moved_after(function() move.goto_previous_end '@method.outer' end)
           end
         end)
-        map(']]', function() move.goto_next_start('@class.outer') end)
-        map('][', function() move.goto_next_end('@class.outer') end)
-        map('[[', function() move.goto_previous_start('@class.outer') end)
-        map('[]', function() move.goto_previous_end('@class.outer') end)
+        map(']]', function() move.goto_next_start '@class.outer' end)
+        map('][', function() move.goto_next_end '@class.outer' end)
+        map('[[', function() move.goto_previous_start '@class.outer' end)
+        map('[]', function() move.goto_previous_end '@class.outer' end)
       end
 
       -- If cpp textobject query is missing the captures we need, inject a minimal one.
@@ -1169,7 +1275,10 @@ require('lazy').setup({
         local have_caps = false
         if okq and q and q.captures then
           for _, c in ipairs(q.captures) do
-            if c == 'function.outer' or c == 'class.outer' then have_caps = true break end
+            if c == 'function.outer' or c == 'class.outer' then
+              have_caps = true
+              break
+            end
           end
         end
         if not have_caps then
@@ -1190,15 +1299,20 @@ require('lazy').setup({
         local okq, q = pcall(function() return vim.treesitter.query.get(ft, 'textobjects') end)
         local caps = {}
         if okq and q and q.captures then
-          for _, c in ipairs(q.captures) do caps[c] = true end
+          for _, c in ipairs(q.captures) do
+            caps[c] = true
+          end
         end
         vim.notify(table.concat({
           'filetype: ' .. ft,
           'has_parser: ' .. tostring(has),
           'query_loaded: ' .. tostring(okq and q ~= nil),
-          'captures: function.outer=' .. tostring(caps['function.outer'] or false)
-            .. ', method.outer=' .. tostring(caps['method.outer'] or false)
-            .. ', class.outer=' .. tostring(caps['class.outer'] or false),
+          'captures: function.outer='
+            .. tostring(caps['function.outer'] or false)
+            .. ', method.outer='
+            .. tostring(caps['method.outer'] or false)
+            .. ', class.outer='
+            .. tostring(caps['class.outer'] or false),
         }, '\n'))
       end, {})
     end,
@@ -1245,9 +1359,7 @@ require('lazy').setup({
         return nodes
       end
 
-      local function to_line_start(r)
-        vim.api.nvim_win_set_cursor(0, { r + 1, 0 })
-      end
+      local function to_line_start(r) vim.api.nvim_win_set_cursor(0, { r + 1, 0 }) end
 
       local function to_line_end_of_closing_brace(r)
         local line = vim.api.nvim_buf_get_lines(0, r, r + 1, false)[1] or ''
@@ -1266,31 +1378,39 @@ require('lazy').setup({
         if forward then
           for _, n in ipairs(nodes) do
             local r, c = (to_end and n.er or n.sr), (to_end and n.ec or n.sc)
-            if r > cr or (r == cr and c > cc) then target = n break end
+            if r > cr or (r == cr and c > cc) then
+              target = n
+              break
+            end
           end
         else
           for i = #nodes, 1, -1 do
             local n = nodes[i]
             local r, c = (to_end and n.er or n.sr), (to_end and n.ec or n.sc)
-            if r < cr or (r == cr and c < cc) then target = n break end
+            if r < cr or (r == cr and c < cc) then
+              target = n
+              break
+            end
           end
         end
         if not target then return end
-        if to_end then to_line_end_of_closing_brace(target.er) else to_line_start(target.sr) end
+        if to_end then
+          to_line_end_of_closing_brace(target.er)
+        else
+          to_line_start(target.sr)
+        end
       end
 
       local function set_maps(bufnr)
-        local map = function(lhs, fn, desc)
-          vim.keymap.set({ 'n', 'x', 'o' }, lhs, fn, { buffer = bufnr, silent = true, desc = desc })
-        end
+        local map = function(lhs, fn, desc) vim.keymap.set({ 'n', 'x', 'o' }, lhs, fn, { buffer = bufnr, silent = true, desc = desc }) end
         map(']m', function() jump('func', false, true) end, 'C/C++ TS: next function start')
-        map(']M', function() jump('func', true,  true) end, 'C/C++ TS: next function end')
+        map(']M', function() jump('func', true, true) end, 'C/C++ TS: next function end')
         map('[m', function() jump('func', false, false) end, 'C/C++ TS: prev function start')
-        map('[M', function() jump('func', true,  false) end, 'C/C++ TS: prev function end')
+        map('[M', function() jump('func', true, false) end, 'C/C++ TS: prev function end')
         map(']]', function() jump('class', false, true) end, 'C/C++ TS: next class/struct start')
-        map('][', function() jump('class', true,  true) end, 'C/C++ TS: next class/struct end')
+        map('][', function() jump('class', true, true) end, 'C/C++ TS: next class/struct end')
         map('[[', function() jump('class', false, false) end, 'C/C++ TS: prev class/struct start')
-        map('[]', function() jump('class', true,  false) end, 'C/C++ TS: prev class/struct end')
+        map('[]', function() jump('class', true, false) end, 'C/C++ TS: prev class/struct end')
       end
 
       vim.api.nvim_create_autocmd('FileType', {
