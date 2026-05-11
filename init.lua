@@ -119,7 +119,9 @@ if vim.fn.has 'win32' == 1 then
     append_to_path_if_present 'C:\\Program Files\\Git\\usr\\bin'
   end
   if vim.fn.executable 'pwsh' == 0 then
-    append_to_path_if_present 'C:\\Program Files\\WindowsApps\\Microsoft.PowerShell_7.6.0.0_x64__8wekyb3d8bbwe'
+    local windowsapps_pwsh = vim.fn.glob('C:\\Program Files\\WindowsApps\\Microsoft.PowerShell_*_x64__8wekyb3d8bbwe', false, true)
+    table.sort(windowsapps_pwsh)
+    if #windowsapps_pwsh > 0 then append_to_path_if_present(windowsapps_pwsh[#windowsapps_pwsh]) end
     append_to_path_if_present('C:\\Users\\' .. user .. '\\AppData\\Local\\Microsoft\\WindowsApps')
     append_to_path_if_present 'C:\\Program Files\\PowerShell\\7'
   end
@@ -214,16 +216,19 @@ vim.o.confirm = true
 -- Prefer PowerShell for :! and other shell-backed commands on Windows.
 if vim.fn.has 'win32' == 1 then
   local ps_shell = ''
+  local is_pwsh = false
   if vim.fn.executable 'pwsh' == 1 then
     ps_shell = 'pwsh'
+    is_pwsh = true
   elseif vim.fn.executable 'powershell' == 1 then
     ps_shell = 'powershell'
   end
 
   if ps_shell ~= '' then
     vim.opt.shell = ps_shell
-    vim.opt.shellcmdflag =
-      "-NoLogo -ExecutionPolicy RemoteSigned -Command [Console]::InputEncoding=[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $PSStyle.OutputRendering='PlainText';"
+    local shell_setup = '[Console]::InputEncoding=[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; '
+    if is_pwsh then shell_setup = shell_setup .. "$PSStyle.OutputRendering='PlainText'; " end
+    vim.opt.shellcmdflag = '-NoLogo -NoProfile -ExecutionPolicy RemoteSigned -Command ' .. shell_setup
     vim.opt.shellredir = '2>&1 | Out-File -Encoding utf8 %s; exit $LastExitCode'
     vim.opt.shellpipe = '2>&1 | Out-File -Encoding utf8 %s; exit $LastExitCode'
     vim.opt.shellquote = ''
