@@ -90,6 +90,15 @@ P.S. You can delete this when you're done too. It's your config now! :)
 vim.g.mapleader = ' '
 vim.g.maplocalleader = ' '
 
+-- Treat Objective-C++ sources as code. Neovim's default filetype rules can
+-- classify .mm as nroff/mm markup, which prevents clangd and C-family settings.
+vim.filetype.add {
+  extension = {
+    mm = 'objcpp',
+    M = 'objcpp',
+  },
+}
+
 -- Ensure critical Windows tooling remains discoverable even if Neovim inherits
 -- a reduced PATH (for example from GUI apps or VS Code host processes).
 if vim.fn.has 'win32' == 1 then
@@ -751,10 +760,53 @@ require('lazy').setup({
       -- Enable the following language servers
       --  Feel free to add/remove any LSPs that you want here. They will automatically be installed.
       --  See `:help lsp-config` for information about keys and how to configure
+      local function clangd_path_mapping_path(path)
+        if not path or path == '' then return nil end
+        local normalized = path:gsub('\\', '/'):gsub('/+$', '')
+        if normalized:match '^%a:' then return '/' .. normalized end
+        return normalized
+      end
+
+      local function macos_remote_clangd_cmd()
+        local host = vim.env.MAC_CLANGD_HOST
+        local local_root = clangd_path_mapping_path(vim.env.MAC_CLANGD_LOCAL_ROOT)
+        local remote_root = clangd_path_mapping_path(vim.env.MAC_CLANGD_REMOTE_ROOT)
+        if not host or host == '' or not local_root or not remote_root then return nil end
+
+        local function shell_quote(arg)
+          return "'" .. tostring(arg):gsub("'", "'\\''") .. "'"
+        end
+
+        local compile_commands_dir = clangd_path_mapping_path(vim.env.MAC_CLANGD_COMPILE_COMMANDS_DIR) or (remote_root .. '/build')
+        local remote_args = {
+          'xcrun',
+          'clangd',
+          '--background-index',
+          '--path-mappings=' .. local_root .. '=' .. remote_root,
+          '--compile-commands-dir=' .. compile_commands_dir,
+        }
+        local remote_cmd = {}
+        for _, arg in ipairs(remote_args) do
+          remote_cmd[#remote_cmd + 1] = shell_quote(arg)
+        end
+
+        return {
+          'ssh',
+          '-o',
+          'BatchMode=yes',
+          '-T',
+          host,
+          table.concat(remote_cmd, ' '),
+        }
+      end
+
       ---@type table<string, vim.lsp.Config>
       local servers = {
         clangd = {
           cmd = (function()
+            local remote_cmd = macos_remote_clangd_cmd()
+            if remote_cmd then return remote_cmd end
+
             if vim.fn.has 'win32' ~= 1 or not vim.uv.fs_stat 'C:/msys64/mingw64/bin/g++.exe' then return nil end
             local mason_clangd = vim.fn.stdpath 'data' .. '/mason/bin/clangd.cmd'
             local clangd_bin = vim.uv.fs_stat(mason_clangd) and mason_clangd or 'clangd'
@@ -882,7 +934,7 @@ require('lazy').setup({
         -- Disable "format_on_save lsp_fallback" for languages that don't
         -- have a well standardized coding style. You can add additional
         -- languages here or re-enable it for the disabled ones.
-        local disable_filetypes = { c = true, cpp = true }
+        local disable_filetypes = { c = true, cpp = true, objc = true, objcpp = true }
         if disable_filetypes[vim.bo[bufnr].filetype] then
           return nil
         else
@@ -1174,6 +1226,10 @@ require('lazy').setup({
         install.prefer_git = true
       end)
 
+      -- nvim-treesitter does not ship a dedicated Objective-C++ parser here.
+      -- The C++ parser still gives useful highlighting/motions for mixed .mm files.
+      pcall(vim.treesitter.language.register, 'cpp', 'objcpp')
+
       configs.setup {
         ensure_installed = { 'bash', 'c', 'cpp', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'python', 'query', 'vim', 'vimdoc' },
         parser_install_dir = parser_install_dir,
@@ -1190,7 +1246,7 @@ require('lazy').setup({
 
       -- If cpp/c filetype opens without a parser, attempt install on the fly
       vim.api.nvim_create_autocmd('FileType', {
-        pattern = { 'c', 'cpp' },
+        pattern = { 'c', 'cpp', 'objcpp' },
         callback = function(args)
           local lang = vim.treesitter.language.get_lang(args.match)
           if not lang then return end
