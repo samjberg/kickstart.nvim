@@ -99,6 +99,27 @@ vim.filetype.add {
   },
 }
 
+-- When editing files from a mapped SMB drive, Neovim can sometimes name buffers
+-- with the underlying UNC path even when cwd is the mapped drive. Remote clangd
+-- cannot decode those UNC file URIs, so keep the buffer name on the mapped path.
+vim.api.nvim_create_autocmd({ 'BufReadPost', 'BufNewFile' }, {
+  desc = 'Prefer mapped-drive buffer names for remote macOS clangd projects',
+  group = vim.api.nvim_create_augroup('kickstart-mac-clangd-mapped-paths', { clear = true }),
+  callback = function(args)
+    if not vim.env.MAC_CLANGD_HOST or vim.env.MAC_CLANGD_HOST == '' then return end
+
+    local cwd = vim.fn.getcwd():gsub('/', '\\'):gsub('\\+$', '')
+    local drive, project = cwd:match '^([A-Za-z]:)\\([^\\]+)'
+    if not drive or drive:lower() ~= 'z:' or not project then return end
+
+    local name = vim.api.nvim_buf_get_name(args.buf)
+    local server, share, unc_project, rest = name:match '^\\\\([^\\]+)\\([^\\]+)\\([^\\]+)\\(.+)$'
+    if not server or share:lower() ~= 'smbshared' or unc_project:lower() ~= project:lower() then return end
+
+    vim.api.nvim_buf_set_name(args.buf, drive .. '\\' .. project .. '\\' .. rest)
+  end,
+})
+
 -- Ensure critical Windows tooling remains discoverable even if Neovim inherits
 -- a reduced PATH (for example from GUI apps or VS Code host processes).
 if vim.fn.has 'win32' == 1 then
@@ -767,10 +788,62 @@ require('lazy').setup({
         return normalized
       end
 
+      local function macos_project_roots_from_cwd()
+        local cwd = vim.fn.getcwd():gsub('\\', '/'):gsub('/+$', '')
+        local drive, project = cwd:match '^([A-Za-z]:)/([^/]+)'
+        local remote_base = clangd_path_mapping_path(vim.env.MAC_CLANGD_REMOTE_BASE or '/Users/sam/SmbShared')
+        if drive and project and drive:lower() == 'z:' and remote_base then return '/' .. drive .. '/' .. project, remote_base .. '/' .. project end
+
+        local share, unc_project = cwd:match '^//[^/]+/([^/]+)/([^/]+)'
+        if share and unc_project and share:lower() == 'smbshared' and remote_base then return '/Z:/' .. unc_project, remote_base .. '/' .. unc_project end
+
+        return nil, nil
+      end
+
+      local function add_unique(list, value)
+        if not value or value == '' then return end
+        for _, existing in ipairs(list) do
+          if existing == value then return end
+        end
+        list[#list + 1] = value
+      end
+
+      local function unc_root_from_path(path)
+        local normalized = path:gsub('/', '\\')
+        local server, share, project = normalized:match '^\\\\([^\\]+)\\([^\\]+)\\([^\\]+)'
+        if not server or not share or not project then return nil end
+        return '\\\\' .. server .. '\\' .. share .. '\\' .. project
+      end
+
+      local function macos_remote_clangd_path_mappings(local_root, remote_root)
+        local client_roots = {}
+        add_unique(client_roots, local_root)
+
+        local cwd = vim.fn.getcwd():gsub('\\', '/'):gsub('/+$', '')
+        local cwd_drive, cwd_project = cwd:match '^([A-Za-z]:)/([^/]+)'
+        if cwd_drive and cwd_project and cwd_drive:lower() == 'z:' then add_unique(client_roots, '/' .. cwd_drive .. '/' .. cwd_project) end
+
+        local buffer_unc_root = unc_root_from_path(vim.api.nvim_buf_get_name(0))
+        local cwd_unc_root = unc_root_from_path(vim.fn.getcwd())
+        add_unique(client_roots, buffer_unc_root)
+        add_unique(client_roots, cwd_unc_root)
+
+        local mappings = {}
+        for _, client_root in ipairs(client_roots) do
+          mappings[#mappings + 1] = client_root .. '=' .. remote_root
+        end
+        return table.concat(mappings, ',')
+      end
+
       local function macos_remote_clangd_cmd()
         local host = vim.env.MAC_CLANGD_HOST
         local local_root = clangd_path_mapping_path(vim.env.MAC_CLANGD_LOCAL_ROOT)
         local remote_root = clangd_path_mapping_path(vim.env.MAC_CLANGD_REMOTE_ROOT)
+        if not local_root or not remote_root then
+          local inferred_local_root, inferred_remote_root = macos_project_roots_from_cwd()
+          local_root = local_root or inferred_local_root
+          remote_root = remote_root or inferred_remote_root
+        end
         if not host or host == '' or not local_root or not remote_root then return nil end
 
         local function shell_quote(arg)
@@ -782,7 +855,7 @@ require('lazy').setup({
           'xcrun',
           'clangd',
           '--background-index',
-          '--path-mappings=' .. local_root .. '=' .. remote_root,
+          '--path-mappings=' .. macos_remote_clangd_path_mappings(local_root, remote_root),
           '--compile-commands-dir=' .. compile_commands_dir,
         }
         local remote_cmd = {}
