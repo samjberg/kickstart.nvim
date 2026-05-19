@@ -276,6 +276,12 @@ vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
 -- Copy filepath to yank register (which is also system clipboard in current setup)
 vim.keymap.set('n', '<leader>fp', ':let @+ = expand("%:p")<CR>', { desc = 'Copy file path' })
 
+-- Delete line contents without deleting the line itself (the newline character)
+vim.keymap.set('n', 'dl', '0d$', {
+  desc = 'Delete entire contents of line',
+  silent = true,
+})
+
 -- Diagnostic Config & Keymaps
 -- See :help vim.diagnostic.Opts
 vim.diagnostic.config {
@@ -846,9 +852,7 @@ require('lazy').setup({
         end
         if not host or host == '' or not local_root or not remote_root then return nil end
 
-        local function shell_quote(arg)
-          return "'" .. tostring(arg):gsub("'", "'\\''") .. "'"
-        end
+        local function shell_quote(arg) return "'" .. tostring(arg):gsub("'", "'\\''") .. "'" end
 
         local compile_commands_dir = clangd_path_mapping_path(vim.env.MAC_CLANGD_COMPILE_COMMANDS_DIR) or (remote_root .. '/build')
         local remote_args = {
