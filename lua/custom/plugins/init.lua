@@ -13,7 +13,9 @@ return {
       local leap = require 'leap'
 
       vim.keymap.set({ 'n', 'x', 'o' }, '<S-J>', '<Plug>(leap)', { desc = 'Leap' })
+      vim.keymap.set({ 'n', 'x', 'o' }, '-', '<Plug>(leap)', { desc = 'Leap' })
       vim.keymap.set('n', '<A-j>', '<Plug>(leap-from-window)', { desc = 'Leap from window' })
+      vim.keymap.set('n', '_', '<Plug>(leap-from-window)', { desc = 'Leap from window' })
 
       vim.keymap.set({ 'n', 'o' }, 'gs', '<Plug>(leap-remote)', { desc = 'Leap remote' })
       vim.keymap.set({ 'n', 'o' }, 'gS', '<Plug>(leap-remote-linewise)', { desc = 'Leap remote linewise' })

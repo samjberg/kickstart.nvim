@@ -275,6 +275,8 @@ vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
 
 -- Copy filepath to yank register (which is also system clipboard in current setup)
 vim.keymap.set('n', '<leader>fp', ':let @+ = expand("%:p")<CR>', { desc = 'Copy file path' })
+-- Copy directory path (of current file buffer) to yank register (which is also system clipboard in current setup)
+vim.keymap.set('n', '<leader>fd', ':let @+ = expand("%:p:h")<CR>', { desc = 'Copy directory path' })
 
 -- Delete line contents without deleting the line itself (the newline character)
 vim.keymap.set('n', 'dl', '0d$', {
@@ -400,6 +402,47 @@ if not (vim.uv or vim.loop).fs_stat(lazypath) then
   local out = vim.fn.system { 'git', 'clone', '--filter=blob:none', '--branch=stable', lazyrepo, lazypath }
   if vim.v.shell_error ~= 0 then error('Error cloning lazy.nvim:\n' .. out) end
 end
+
+local function log_str(s)
+  local logfile = io.open('/Users/sjber/nvimlog.txt', 'a+')
+  logfile:write(s)
+  logfile:close()
+end
+
+-- vim.api.nvim_create_autocmd('LspNotify', {
+--   callback = function(ev)
+--     local bufnr = ev.buf
+--     local client_id = ev.data.client_id
+--     local method = ev.data.client_idod
+--     local params = ev.data.params
+--     local current_dir = vim.fn.getcwd()
+--
+--     local notify_logfile = io.open('/Users/sjber/nvimlog.txt', 'a+')
+--     local s = 'Receieved response, client_id: ' .. tostring(client_id) .. ' cwd: ' .. current_dir .. '\n'
+--     notify_logfile:write(s)
+--   end,
+-- })
+--
+
+-- vim.api.nvim_create_autocmd('DiagnosticChanged', {
+--   callback = function(ev)
+--     local diagsref = vim.diagnostic.get()
+--     local diags = ev.data.diagnostics
+--     local length = #diags
+--     -- log_str(diags.message)
+--     if length > 0 then log_str(diags[1].message) end
+--
+--     -- Your command here, e.g., print a message or update a status line
+--     -- print 'LSP diagnostics have changed!'
+--   end,
+-- })
+--
+vim.keymap.set({ 'n', 'x' }, '<leader>rgf', function()
+  local word_under_cursor = vim.fn.expand '<cWORD>'
+  word_under_cursor = string.sub(word_under_cursor, 2, string.len(word_under_cursor) - 1)
+  print(word_under_cursor)
+  -- print 'successfully launched remote get file command (it doesnt do anything yet)'
+end)
 
 ---@type vim.Option
 local rtp = vim.opt.rtp
@@ -1497,7 +1540,11 @@ require('lazy').setup({
         return nodes
       end
 
-      local function to_line_start(r) vim.api.nvim_win_set_cursor(0, { r + 1, 0 }) end
+      local function to_line_first_word(r)
+        local line = vim.api.nvim_buf_get_lines(0, r, r + 1, false)[1] or ''
+        local col = (line:find '%S' or 1) - 1
+        vim.api.nvim_win_set_cursor(0, { r + 1, col })
+      end
 
       local function to_line_end_of_closing_brace(r)
         local line = vim.api.nvim_buf_get_lines(0, r, r + 1, false)[1] or ''
@@ -1535,7 +1582,7 @@ require('lazy').setup({
         if to_end then
           to_line_end_of_closing_brace(target.er)
         else
-          to_line_start(target.sr)
+          to_line_first_word(target.sr)
         end
       end
 
