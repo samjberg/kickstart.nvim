@@ -1112,6 +1112,9 @@ require('lazy').setup({
         pyright = {},
         ts_ls = {},
         powershell_es = {
+          -- Avoid the WindowsApps pwsh alias/package resolution path here:
+          -- Neovim's LSP transport can hit EPERM spawning it with stdio pipes.
+          shell = 'C:\\Program Files\\WindowsApps\\Microsoft.PowerShell_7.6.1.0_x64__8wekyb3d8bbwe\\pwsh.exe',
           -- mason-lspconfig currently derives this from $MASON; if that env var
           -- is unset on Windows, the server command can become "nil/...".
           bundle_path = vim.fn.stdpath 'data' .. '/mason/packages/powershell-editor-services',
