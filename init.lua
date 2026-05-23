@@ -409,34 +409,77 @@ local function log_str(s)
   logfile:close()
 end
 
--- vim.api.nvim_create_autocmd('LspNotify', {
---   callback = function(ev)
---     local bufnr = ev.buf
---     local client_id = ev.data.client_id
---     local method = ev.data.client_idod
---     local params = ev.data.params
---     local current_dir = vim.fn.getcwd()
---
---     local notify_logfile = io.open('/Users/sjber/nvimlog.txt', 'a+')
---     local s = 'Receieved response, client_id: ' .. tostring(client_id) .. ' cwd: ' .. current_dir .. '\n'
---     notify_logfile:write(s)
---   end,
--- })
---
+-- helper function to check if a file exists at fpath
+local function file_exists(fpath)
+  local file = io.open(fpath, 'r')
+  if file then
+    file:close()
+    return true
+  else
+    return false
+  end
+end
 
--- vim.api.nvim_create_autocmd('DiagnosticChanged', {
---   callback = function(ev)
---     local diagsref = vim.diagnostic.get()
---     local diags = ev.data.diagnostics
---     local length = #diags
---     -- log_str(diags.message)
---     if length > 0 then log_str(diags[1].message) end
---
---     -- Your command here, e.g., print a message or update a status line
---     -- print 'LSP diagnostics have changed!'
---   end,
--- })
---
+local function normalize_path(path, delim)
+  if delim == '/' then
+    return string.gsub(path, '\\', '/')
+  elseif delim == '\\' then
+    return string.gsub(path, '/', '\\')
+  end
+end
+
+local function makedirs(path, exist_ok)
+  if not path or path == '' then error 'makedirs: path must be a non-empty string' end
+
+  local mode = 511 -- 0777
+  local sep = package.config:sub(1, 1)
+  local normalized = normalize_path(path, sep)
+  local stat = vim.uv.fs_stat(normalized)
+
+  if stat then
+    if stat.type == 'directory' and exist_ok then return true end
+    error('makedirs: path already exists: ' .. normalized)
+  end
+
+  local root = ''
+  local rest = normalized
+
+  if sep == '\\' then
+    local drive = rest:match '^%a:\\'
+    local unc_root = rest:match '^(\\\\[^\\]+\\[^\\]+)\\?'
+
+    if unc_root then
+      root = unc_root
+      rest = rest:sub(#unc_root + 2)
+    elseif drive then
+      root = drive
+      rest = rest:sub(#drive + 1)
+    end
+  elseif rest:sub(1, 1) == '/' then
+    root = '/'
+    rest = rest:sub(2)
+  end
+
+  local current = root
+  for part in rest:gmatch('[^' .. (sep == '\\' and '\\' or '/') .. ']+') do
+    if current == '' or current:sub(-1) == sep then
+      current = current .. part
+    else
+      current = current .. sep .. part
+    end
+    stat = vim.uv.fs_stat(current)
+
+    if stat then
+      if stat.type ~= 'directory' then error('makedirs: path component exists and is not a directory: ' .. current) end
+    else
+      local ok, err = vim.uv.fs_mkdir(current, mode)
+      if not ok then error('makedirs: failed to create directory ' .. current .. ': ' .. tostring(err)) end
+    end
+  end
+
+  return true
+end
+
 vim.keymap.set({ 'n', 'x' }, '<leader>rgf', function()
   local word_under_cursor = vim.fn.expand '<cWORD>'
   word_under_cursor = string.sub(word_under_cursor, 2, string.len(word_under_cursor) - 1)
@@ -680,6 +723,52 @@ require('lazy').setup({
           -- Useful when you're not sure what type a variable is and you want to see
           -- the definition of its *type*, not where it was *defined*.
           vim.keymap.set('n', 'grt', builtin.lsp_type_definitions, { buffer = buf, desc = '[G]oto [T]ype Definition' })
+
+          -- vim.keymap.set('n', '<C-]>', function()
+          --   local keys = vim.api.nvim_replace_termcodes('<C-]>', true, false, true)
+          --
+          --   local sys_cmd = 'ssh mac_clangd \'zsh -lc "cat"\''
+          --
+          --   -- vim.fn.system()
+          --
+          --   local ok, err = pcall(function() vim.cmd.normal { args = { keys }, bang = true } end)
+          --   local missing_path = tostring(err):match 'E429:.*"([^"]+)"'
+          --
+          --   if ok then return end
+          --   -- fallback / logging / context handling here
+          --
+          --   -- local missing_path = tostring(err):match 'E429:.*"([^"]+)"'
+          --
+          --   -- print('Missing definition target: ' .. missing_path) -- , vim.log.levels.WARN)
+          --
+          --   if missing_path then
+          --     -- print('Missing definition target: ' .. missing_path) -- , vim.log.levels.WARN)
+          --
+          --     -- Your fallback path here.
+          --     -- Example:
+          --     -- require('telescope.builtin').find_files { default_text = vim.fn.fnamemodify(missing_path, ':t') }
+          --
+          --     return
+          --   end
+          --   vim.notify(err, vim.log.levels.WARN)
+          --   vim.lsp.buf.definition()
+          --   -- print 'HANDLED ERROR IN GO TO DEFINITION'
+          --   print(vim.env.MAC_PROJECT_NAME)
+          -- end, { buffer = event.buf, desc = 'Wrapped tag/LSP definition jump' })
+
+          -- vim.keymap.set('n', '<C-]>', function()
+          --   local keys = vim.api.nvim_replace_termcodes('<C-]>', true, false, true)
+          --
+          --   local ok, err = pcall(function() vim.cmd.normal { args = { keys }, bang = true } end)
+          --
+          --   if not ok then
+          --     -- fallback / logging / context handling here
+          --     vim.notify(err, vim.log.levels.WARN)
+          --     vim.lsp.buf.definition()
+          --     -- print 'HANDLED ERROR IN GO TO DEFINITION'
+          --     print(vim.env.MAC_PROJECT_NAME)
+          --   end
+          -- end, { buffer = event.buf, desc = 'Wrapped tag/LSP definition jump' })
         end,
       })
 
@@ -816,6 +905,61 @@ require('lazy').setup({
               end,
             })
           end
+
+          -- Wrapper around go to definition for handling fallback for failures in remote case
+          vim.keymap.set('n', '<C-]>', function()
+            local keys = vim.api.nvim_replace_termcodes('<C-]>', true, false, true)
+
+            -- vim.fn.system()
+
+            local ok, err = pcall(function() vim.cmd.normal { args = { keys }, bang = true } end)
+            local missing_path = tostring(err):match 'E429:.*"([^"]+)"'
+
+            if ok then return end
+            -- fallback / logging / context handling here
+
+            -- fallback path when file is not found locally.  Attempt to check if file exists on remote, if so copy it to shared definitions (headers) root
+            if missing_path then
+              if string.find(missing_path, '/Library') == 1 then
+                local env_vars = vim.fn.environ()
+                local fallback_root = env_vars['MAC_CLANGD_DEFINITIONS_LOCAL_ROOT']
+                local fallback_remote_root = env_vars['MAC_CLANGD_DEFINITIONS_REMOTE_ROOT']
+                local fallback_path = fallback_root .. normalize_path(missing_path, '\\')
+                local fallback_remote_path = fallback_remote_root .. normalize_path(missing_path, '/')
+                print('fallback_path: ' .. fallback_path)
+
+                if file_exists(fallback_path) then
+                  vim.cmd('edit ' .. fallback_path)
+                  return
+                end
+
+                local full_pathlen = string.len(missing_path)
+                local rev_fullpath = string.reverse(missing_path)
+                local sep_idx = full_pathlen - string.find(rev_fullpath, '/')
+                -- string.find(string.reverse(missing_path), '/')
+                local missing_path_dir = fallback_root .. string.sub(missing_path, 1, sep_idx)
+
+                print(fallback_remote_path)
+                -- return
+                makedirs(missing_path_dir, true)
+
+                local sys_cmd = 'ssh mac-clangd \'zsh -lc "cp ' .. missing_path .. ' ' .. fallback_remote_path .. '"\''
+                local cmd_output = vim.fn.system(sys_cmd)
+                print(cmd_output)
+
+                vim.cmd('edit ' .. fallback_path)
+                return
+              else
+                print('Invalid remote path: ' .. missing_path)
+                return
+              end
+              return
+            end
+            vim.notify(err, vim.log.levels.WARN)
+            vim.lsp.buf.definition()
+            -- print 'HANDLED ERROR IN GO TO DEFINITION'
+            print(vim.env.MAC_PROJECT_NAME)
+          end, { buffer = event.buf, desc = 'Wrapped tag/LSP definition jump' })
 
           -- The following code creates a keymap to toggle inlay hints in your
           -- code, if the language server you are using supports them
