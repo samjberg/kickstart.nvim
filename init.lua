@@ -1233,10 +1233,13 @@ require('lazy').setup({
         -- But for many setups, the LSP (`ts_ls`) will work just fine
         -- ts_ls = {},
 
-        stylua = {}, -- Used to format Lua code
-
         -- Special Lua Config, as recommended by neovim help docs
         lua_ls = {
+          cmd = (function()
+            local mason_lua_ls = vim.fn.stdpath 'data' .. '/mason/bin/lua-language-server.cmd'
+            if vim.fn.has 'win32' == 1 and vim.uv.fs_stat(mason_lua_ls) then return { mason_lua_ls } end
+            return { 'lua-language-server' }
+          end)(),
           on_init = function(client)
             if client.workspace_folders then
               local path = client.workspace_folders[1].name
@@ -1275,6 +1278,7 @@ require('lazy').setup({
       local ensure_installed = vim.tbl_keys(servers or {})
       vim.list_extend(ensure_installed, {
         -- You can add other tools here that you want Mason to install
+        'stylua',
       })
 
       require('mason-tool-installer').setup { ensure_installed = ensure_installed }
@@ -1283,6 +1287,27 @@ require('lazy').setup({
         vim.lsp.config(name, server)
         vim.lsp.enable(name)
       end
+
+      local function start_lua_ls(bufnr)
+        if not vim.api.nvim_buf_is_loaded(bufnr) or vim.bo[bufnr].filetype ~= 'lua' then return end
+
+        local config = vim.deepcopy(vim.lsp.config.lua_ls)
+        local bufname = vim.api.nvim_buf_get_name(bufnr)
+        config.root_dir = vim.fs.root(bufname, { '.luarc.json', '.luarc.jsonc', '.stylua.toml', 'stylua.toml', '.git' }) or vim.fn.stdpath 'config'
+        vim.lsp.start(config, { bufnr = bufnr })
+      end
+
+      vim.api.nvim_create_autocmd('FileType', {
+        group = vim.api.nvim_create_augroup('kickstart-lua-lsp-start', { clear = true }),
+        pattern = 'lua',
+        callback = function(args) start_lua_ls(args.buf) end,
+      })
+
+      vim.schedule(function()
+        for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+          start_lua_ls(bufnr)
+        end
+      end)
     end,
   },
 
