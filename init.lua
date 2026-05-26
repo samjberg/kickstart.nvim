@@ -480,12 +480,115 @@ local function makedirs(path, exist_ok)
   return true
 end
 
-vim.keymap.set({ 'n', 'x' }, '<leader>rgf', function()
-  local word_under_cursor = vim.fn.expand '<cWORD>'
-  word_under_cursor = string.sub(word_under_cursor, 2, string.len(word_under_cursor) - 1)
-  print(word_under_cursor)
-  -- print 'successfully launched remote get file command (it doesnt do anything yet)'
+-- set alt-o to behave the same as o except that it does not insert a newline
+vim.keymap.set('n', '<M-o>', function()
+  -- 1. Move down to the next line natively
+  vim.cmd('normal! j')
+  
+  -- 2. Check if the line we landed on is completely empty (or just whitespace)
+  if vim.fn.getline('.'):match('^%s*$') then
+    -- 'S' clears the blank line and triggers native smart-indent,
+    -- leaving you actively in Insert mode at the correct column.
+    vim.api.nvim_feedkeys(
+      vim.api.nvim_replace_termcodes('S', true, false, true),
+      'nt',
+      false
+    )
+  else
+    -- If there is already code there, 'i' puts you at the start of the line
+    -- (or you can change 'i' to 'A' or '^i' depending on where you prefer to land)
+    vim.api.nvim_feedkeys(
+      vim.api.nvim_replace_termcodes('^i', true, false, true),
+      'nt',
+      false
+    )
+  end
+end, { desc = 'Go to next line and enter Insert mode with smart indent' })
+
+-- local function select_current_block()
+--   local curr_line = vim.fn.getline('.')
+--
+--   -- Strip trailing whitespace characters (%s matches spaces, tabs, and carriage returns)
+--   local trimmed_line = curr_line:gsub("%s+$", "")
+--
+--   local curr_line_len = trimmed_line:len()
+--
+--   if curr_line_len == 0 then
+--     return -- Empty line, nothing to do
+--   end
+--
+--   local last_char = trimmed_line:sub(curr_line_len)
+--
+--   -- This will now print exactly what you expect
+--   print(last_char .. " == {: " .. tostring(last_char == '{'))
+-- end
+
+
+
+-- Select the entirety of the current function
+local function select_current_block()
+  local curr_line = vim.fn.getline('.')
+  local curr_line_len = curr_line:len()
+  local last_char = curr_line:sub(curr_line_len)
+  if last_char ~= '{' then
+    local next_row_number = vim.api.nvim_win_get_cursor(0)[1] + 1
+    local first_char = vim.fn.getline(next_row_number):sub(1, 2)
+    -- we are not at the beginning of a function, so we assume we are in the middle/end of one, and go back to start with [m
+    if first_char ~= '{' then
+      vim.cmd('normal [m')
+    end
+  end
+
+  vim.cmd('normal! 0v$%')
+end
+
+-- Select the entirety of the current function
+local function select_entire_function_c()
+  local start_pos = vim.api.nvim_win_get_cursor(0)
+  local curr_line = vim.fn.getline('.')
+  local curr_line_len = curr_line:len()
+  local last_char = curr_line:sub(curr_line_len)
+  local moved = false
+  if last_char ~= '{' then
+    local next_row_number = start_pos[1] + 1
+    local first_char = vim.fn.getline(next_row_number):sub(1, 2)
+    -- we are not at the beginning of a function, so we assume we are in the middle/end of one, and go back to start with [m
+    if first_char ~= '{' then
+      vim.cmd('normal [m')
+      moved = true
+    end
+  end
+  -- If this block executes, it means that the last char (on the first or next line) WAS {
+  -- However this could be from an inner block inside a function like an if/while/switch block, or even another function, whatever
+  if not moved then
+    vim.cmd('normal [m')
+  end
+
+  vim.cmd('normal! 0v$%')
+end
+
+
+-- set f to essentially be a motion/textobject representing the entirety of the current function
+vim.keymap.set('o', 'f', select_entire_function_c, { desc = "Target entirety of current function" })
+vim.keymap.set('x', 'f', select_entire_function_c, { desc = "Target entirety of current function" })
+
+-- set keymap to run the current project using ConfigReader and the default arguments set in the .conf file
+vim.keymap.set('n', '<leader>rpc', function()
+  local exe_path = '/Users/sjber/Coding/C++/ConfigReader/run_project.exe'
+  io.popen(exe_path)
 end)
+
+
+
+-- set [r]eplace [w]ord (rw) to replace the current word with the contents of the yank buffer
+-- vim.keymap.set('n', 'grw', [["_dw"+P]])
+vim.keymap.set('n', 'grw', [["_dwP]])
+-- vim.keymap.set('n', 'grw', select_current_block_c)
+
+-- vim.keymap.set('n', 'B', [[[m0v$%]])
+
+
+
 
 ---@type vim.Option
 local rtp = vim.opt.rtp
@@ -1201,7 +1304,7 @@ require('lazy').setup({
         -- Disable "format_on_save lsp_fallback" for languages that don't
         -- have a well standardized coding style. You can add additional
         -- languages here or re-enable it for the disabled ones.
-        local disable_filetypes = { c = true, cpp = true, objc = true, objcpp = true }
+        local disable_filetypes = { c = true, cpp = true, lua = true, objc = true, objcpp = true }
         if disable_filetypes[vim.bo[bufnr].filetype] then
           return nil
         else
