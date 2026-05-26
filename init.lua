@@ -596,6 +596,17 @@ local function splitstr(str, sep)
   return table
 end
 
+local function find_in_table(table, item)
+  local i = 1
+  for k, v in pairs(table) do
+    if v == item then
+      return i
+    end
+    i = i + 1
+  end
+  return -1
+end
+
 vim.api.nvim_create_user_command('Runproject', function(opts)
   local args = opts.args
   local exe_path = '/Users/sjber/Coding/C++/ConfigReader/run_project.exe'
@@ -1192,45 +1203,60 @@ require('lazy').setup({
 
       ---@type table<string, vim.lsp.Config>
       local servers = {
-        clangd = {
+        myclangd_proxy = {
           cmd = (function()
-            local remote_cmd = macos_remote_clangd_cmd()
-            if remote_cmd then return remote_cmd end
-
-            if vim.fn.has 'win32' ~= 1 or not vim.uv.fs_stat 'C:/msys64/mingw64/bin/g++.exe' then return nil end
             local mason_clangd = vim.fn.stdpath 'data' .. '/mason/bin/clangd.cmd'
             local clangd_bin = vim.uv.fs_stat(mason_clangd) and mason_clangd or 'clangd'
-            return { clangd_bin, '--query-driver=C:/msys64/mingw64/bin/*' }
+            local python_exe = 'C:/Python313/python.exe'
+            local my_script_path = 'C:/Users/sjber/Coding/Python/Remote-Xcode-Server/lsp_wrapper.py'
+            local qd_arg = '--query-driver=C:/msys64/mingw64/bin/*'
+            return {python_exe, my_script_path, qd_arg}
           end)(),
-          init_options = {
-            -- Use modern C++ when no compile_commands.json is available.
-            fallbackFlags = (function()
-              local flags = { '-std=c++20' }
-              if vim.fn.has 'win32' == 1 and vim.uv.fs_stat 'C:/msys64/mingw64' then
-                -- Make clangd fallback parse with the MinGW target/sysroot.
-                vim.list_extend(flags, {
-                  '--target=x86_64-w64-windows-gnu',
-                  '--sysroot=C:/msys64/mingw64',
-                })
-              end
-              if vim.fn.has 'win32' == 1 and vim.uv.fs_stat 'C:/msys64/mingw64/include/ncurses' then
-                -- Support projects that include <ncurses.h> directly.
-                vim.list_extend(flags, { '-isystem', 'C:/msys64/mingw64/include/ncurses' })
-              end
-              -- Pick up Python/pybind11 headers for projects without compile_commands.json
-              -- (e.g. setuptools/pybind11 builds).
-              local pybind_includes = vim.fn.systemlist 'python -m pybind11 --includes'
-              if vim.v.shell_error == 0 then
-                for _, line in ipairs(pybind_includes) do
-                  for inc in string.gmatch(line, '%-I(%S+)') do
-                    vim.list_extend(flags, { '-isystem', inc })
-                  end
-                end
-              end
-              return flags
-            end)(),
-          },
+          filetypes = {'c', 'cpp', 'objc', 'objcpp', 'cuda', 'proto'},
+          root_markers = {'compile_commands.json', '.clangd', '.git', 'compile_flags.txt'}
         },
+
+
+        -- clangd = {
+        --   cmd = (function()
+        --     local remote_cmd = macos_remote_clangd_cmd()
+        --     if remote_cmd then return remote_cmd end
+        --
+        --     if vim.fn.has 'win32' ~= 1 or not vim.uv.fs_stat 'C:/msys64/mingw64/bin/g++.exe' then return nil end
+        --     local mason_clangd = vim.fn.stdpath 'data' .. '/mason/bin/clangd.cmd'
+        --     local clangd_bin = vim.uv.fs_stat(mason_clangd) and mason_clangd or 'clangd'
+        --     return { clangd_bin, '--query-driver=C:/msys64/mingw64/bin/*' }
+        --   end)(),
+        --   init_options = {
+        --     -- Use modern C++ when no compile_commands.json is available.
+        --     fallbackFlags = (function()
+        --       local flags = { '-std=c++20' }
+        --       if vim.fn.has 'win32' == 1 and vim.uv.fs_stat 'C:/msys64/mingw64' then
+        --         -- Make clangd fallback parse with the MinGW target/sysroot.
+        --         vim.list_extend(flags, {
+        --           '--target=x86_64-w64-windows-gnu',
+        --           '--sysroot=C:/msys64/mingw64',
+        --         })
+        --       end
+        --       if vim.fn.has 'win32' == 1 and vim.uv.fs_stat 'C:/msys64/mingw64/include/ncurses' then
+        --         -- Support projects that include <ncurses.h> directly.
+        --         vim.list_extend(flags, { '-isystem', 'C:/msys64/mingw64/include/ncurses' })
+        --       end
+        --       -- Pick up Python/pybind11 headers for projects without compile_commands.json
+        --       -- (e.g. setuptools/pybind11 builds).
+        --       local pybind_includes = vim.fn.systemlist 'python -m pybind11 --includes'
+        --       if vim.v.shell_error == 0 then
+        --         for _, line in ipairs(pybind_includes) do
+        --           for inc in string.gmatch(line, '%-I(%S+)') do
+        --             vim.list_extend(flags, { '-isystem', inc })
+        --           end
+        --         end
+        --       end
+        --       return flags
+        --     end)(),
+        --   },
+        -- },
+
         bashls = {},
         cssls = {},
         html = {},
@@ -1296,7 +1322,25 @@ require('lazy').setup({
       --    :Mason
       --
       -- You can press `g?` for help in this menu.
-      local ensure_installed = vim.tbl_keys(servers or {})
+      -- local ensure_installed = vim.tbl_keys(servers or {})
+      -- local ensure_installed = {
+      --   'bash-language-server',
+      --   'clangd',
+      --   'css-lsp',
+      --   'html-lsp',
+      --   'json-lsp',
+      --   'lua-language-server',
+      --   'powershell-editor-services',
+      --   'pyright',
+      --   'stylua',
+      --   'typescript-language-server',
+      -- }
+
+      local ensure_installed = vim.tbl_filter(function(server)
+        return server ~= 'myclangd_proxy'
+      end, vim.tbl_keys(servers or {}))
+
+
       vim.list_extend(ensure_installed, {
         -- You can add other tools here that you want Mason to install
         'stylua',
@@ -1304,6 +1348,8 @@ require('lazy').setup({
 
       require('mason-tool-installer').setup { ensure_installed = ensure_installed }
 
+      local clangd_proxy_idx = -1
+      local curr_idx = 1
       for name, server in pairs(servers) do
         vim.lsp.config(name, server)
         if name ~= 'lua_ls' then vim.lsp.enable(name) end
