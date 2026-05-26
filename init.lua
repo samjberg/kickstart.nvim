@@ -571,8 +571,8 @@ end
 
 
 -- set f to essentially be a motion/textobject representing the entirety of the current function
-vim.keymap.set('o', 'f', select_entire_function_c, { desc = "Target entirety of current function" })
-vim.keymap.set('x', 'f', select_entire_function_c, { desc = "Target entirety of current function" })
+vim.keymap.set('o', 'f', select_current_block, { desc = "Target entirety of current function" })
+vim.keymap.set('x', 'f', select_current_block, { desc = "Target entirety of current function" })
 
 -- set keymap to run the current project using ConfigReader and the default arguments set in the .conf file
 vim.keymap.set('n', '<leader>rpc', function()
@@ -580,13 +580,34 @@ vim.keymap.set('n', '<leader>rpc', function()
   io.popen(exe_path)
 end)
 
+local function splitstr(str, sep)
+  sep = sep or '\n'
+  local lst = {}
+  local function appendtolst(x) table.insert(lst, x) end
+  local i = 1
+  while (i < string.len(str)) do
+    local find_res = string.find(str, sep, i)
+    if not find_res then break end
+    local substr = string.sub(str, i, find_res-1)
+    table[#table + 1] = substr
+    appendtolst(substr)
+    i = find_res + 1
+  end
+  return table
+end
+
+vim.api.nvim_create_user_command('Runproject', function(opts)
+  local args = opts.args
+  local exe_path = '/Users/sjber/Coding/C++/ConfigReader/run_project.exe'
+  local full_command = exe_path .. ' ' .. args
+  io.popen(full_command)
+  -- string.
+  -- print(opts.args)
+end, {nargs='*'})
 
 
 -- set [r]eplace [w]ord (rw) to replace the current word with the contents of the yank buffer
--- vim.keymap.set('n', 'grw', [["_dw"+P]])
 vim.keymap.set('n', 'grw', [["_dwP]])
--- vim.keymap.set('n', 'grw', select_current_block_c)
-
 -- vim.keymap.set('n', 'B', [[[m0v$%]])
 
 
@@ -1285,19 +1306,32 @@ require('lazy').setup({
 
       for name, server in pairs(servers) do
         vim.lsp.config(name, server)
-        vim.lsp.enable(name)
+        if name ~= 'lua_ls' then vim.lsp.enable(name) end
       end
 
       local function start_lua_ls(bufnr)
         if not vim.api.nvim_buf_is_loaded(bufnr) or vim.bo[bufnr].filetype ~= 'lua' then return end
+        if #vim.lsp.get_clients { bufnr = bufnr, name = 'lua_ls' } > 0 then return end
 
-        local config = vim.deepcopy(vim.lsp.config.lua_ls)
+        local base_config = vim.lsp.config.lua_ls
+        if not base_config then return end
+
         local bufname = vim.api.nvim_buf_get_name(bufnr)
-        config.root_dir = vim.fs.root(bufname, { '.luarc.json', '.luarc.jsonc', '.stylua.toml', 'stylua.toml', '.git' }) or vim.fn.stdpath 'config'
-        vim.lsp.start(config, { bufnr = bufnr })
+        local markers = vim.fs.find({ '.luarc.json', '.luarc.jsonc', '.stylua.toml', 'stylua.toml', '.git' }, {
+          path = vim.fs.dirname(bufname),
+          upward = true,
+        })
+        local root = markers[1] and vim.fs.dirname(markers[1]) or vim.fn.stdpath 'config'
+        local config = vim.deepcopy(base_config)
+        config.root_dir = root
+
+        vim.lsp.start(config, {
+          bufnr = bufnr,
+          reuse_client = function(client, client_config) return client.name == client_config.name and client.config.root_dir == client_config.root_dir end,
+        })
       end
 
-      vim.api.nvim_create_autocmd('FileType', {
+      vim.api.nvim_create_autocmd({ 'FileType', 'BufEnter' }, {
         group = vim.api.nvim_create_augroup('kickstart-lua-lsp-start', { clear = true }),
         pattern = 'lua',
         callback = function(args) start_lua_ls(args.buf) end,
