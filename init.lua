@@ -92,6 +92,10 @@ vim.g.maplocalleader = ' '
 
 vim.cmd 'syntax enable'
 
+vim.g.python_indent = vim.tbl_extend('force', vim.g.python_indent or {}, {
+  disable_parentheses_indenting = true,
+})
+
 -- Treat Objective-C++ sources as code. Neovim's default filetype rules can
 -- classify .mm as nroff/mm markup, which prevents clangd and C-family settings.
 vim.filetype.add {
@@ -280,11 +284,22 @@ vim.keymap.set('n', '<leader>fp', ':let @+ = expand("%:p")<CR>', { desc = 'Copy 
 -- Copy directory path (of current file buffer) to yank register (which is also system clipboard in current setup)
 vim.keymap.set('n', '<leader>fd', ':let @+ = expand("%:p:h")<CR>', { desc = 'Copy directory path' })
 
+vim.keymap.set('n', '<leader>fr', function() 
+  vim.cmd('normal! edit')
+end, { desc = 'Refresh contents of current file buffer' })
+
 -- Delete line contents without deleting the line itself (the newline character)
 vim.keymap.set('n', 'dl', '0d$', {
   desc = 'Delete entire contents of line',
   silent = true,
 })
+
+-- Change line contents without deleting the line itself (the newline character)
+vim.keymap.set('n', 'cl', '0c$', {
+  desc = 'Delete entire contents of line',
+  silent = true,
+})
+
 
 -- Diagnostic Config & Keymaps
 -- See :help vim.diagnostic.Opts
@@ -580,6 +595,12 @@ vim.keymap.set('n', '<leader>rpc', function()
   io.popen(exe_path)
 end)
 
+
+-- set keymap to open built in file browser net-rw
+vim.keymap.set('n', '<leader>fb', function()
+  vim.cmd('Explore')
+end)
+
 local function splitstr(str, sep)
   sep = sep or '\n'
   local lst = {}
@@ -607,6 +628,10 @@ local function find_in_table(table, item)
   return -1
 end
 
+local nvim_data_path = vim.fn.stdpath('data')
+local nvim_lsp_log_path = nvim_data_path .. '/lsp.log'
+local nvim_proxy_log_path = 'C:/Users/sjber/tmp/lsp_proxy_log.txt'
+
 vim.api.nvim_create_user_command('Runproject', function(opts)
   local args = opts.args
   local exe_path = '/Users/sjber/Coding/C++/ConfigReader/run_project.exe'
@@ -616,10 +641,165 @@ vim.api.nvim_create_user_command('Runproject', function(opts)
   -- print(opts.args)
 end, {nargs='*'})
 
+-- Create a user command to fix tabs in one command (without having to separately set tabstop, softtabstop, shiftwidth, and expandtab)
+-- Defaults to 4 for all of them (and true for expandtab), but it takes an optional argument which is used as the value for all of them
+vim.api.nvim_create_user_command('SetTabs', function(opts)
+  local args = opts.args
+  local width = tonumber(args) or 4
+  if args:len() == 0 then width = 4 end
+  vim.opt.tabstop = width
+  vim.opt.softtabstop = width
+  vim.opt.shiftwidth = width
+end, {nargs='*'})
+
+
+vim.api.nvim_create_user_command('OpenLog', function(opts)
+  local arg = opts.args or 'proxy'
+  local log_path = ''
+  if arg == 'proxy' then
+    log_path = nvim_proxy_log_path
+  else
+    log_path = nvim_lsp_log_path
+  end
+  vim.cmd('edit ' .. log_path)
+end, {nargs='*'})
+
+vim.api.nvim_create_user_command('ClearLog', function(opts)
+  local arg = opts.args or 'proxy'
+  local log_path = ''
+  if arg == 'proxy' then
+    log_path = nvim_proxy_log_path
+  else
+    log_path = nvim_lsp_log_path
+  end
+  io.open(log_path, 'w'):close()
+
+end, {nargs='*'})
+
+-- set keybind for opening nvim proxy lsp log
+vim.keymap.set('n', '<leader>op', function()
+  vim.cmd('OpenLog proxy')
+end)
+
+-- set keybind for [o]pening nvim [l]sp.log (in nvim-data/lsp.log)
+vim.keymap.set('n', '<leader>ol', function()
+  vim.cmd('OpenLog lsp')
+end)
+
+
+
+
+-- Search Microsoft Learn for C# Documentation
+vim.keymap.set("n", "<leader>md", function()
+  local word = vim.fn.expand("<cword>")
+  local encoded = vim.fn.system({ "python", "-c", "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))", word })
+  encoded = encoded:gsub("%s+$", "")
+  vim.ui.open("https://learn.microsoft.com/en-us/search/?terms=" .. encoded)
+end, { desc = "Search Microsoft Learn" })
+
+-- Search Microsoft Learn for C# WinUI Documentation
+vim.keymap.set("n", "<leader>mw", function()
+  local word = vim.fn.expand("<cword>")
+  local encoded = vim.fn.system({ "python", "-c", "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))", word })
+  encoded = encoded:gsub("%s+$", "")
+  vim.ui.open("https://learn.microsoft.com/en-us/search/?terms=WinUI%20" .. encoded)
+end, { desc = "Search Microsoft Learn WinUI" })
+
+
+
+-- vim.keymap.set('n', '<leader>ol', function()
+--   local popup_buf = vim.api.nvim_create_buf(false, true)
+--   local data_path = nvim_data_path
+--   local log_locs = {data_path .. '\\lsp.log', 'C:\\Users\\sjber\\tmp\\lsp_proxy_log.txt', 'C:\\Users\\sjber\\tmp\\lsp_proxy_error_log.txt'}
+--   local log_names = {'NVim LSP Log', 'LSP Proxy Log', 'LSP Proxy Error Log'}
+--   local buf_lines = {}
+--   local max_line_length = 0
+--   for i = 1, #log_locs, 1 do
+--     -- print(i)
+--     local line = log_names[i] .. ': ' .. log_locs[i]
+--     local length = line:len()
+--     if length > max_line_length then
+--       max_line_length = length
+--     end
+--     table.insert(buf_lines, log_names[i] .. ': ' .. log_locs[i])
+--     -- buf_lines[#buf_lines] = log_names[i] .. ': ' .. log_locs[i]
+--   end
+--
+--   local popup_width = max_line_length + 5
+--   local popup_height = #buf_lines
+--
+--   vim.api.nvim_buf_set_lines(popup_buf, 0, -1, false, buf_lines)
+--   vim.api.nvim_open_win(popup_buf, true, {
+--     relative="cursor",
+--     row=1,
+--     col=0,
+--     width = popup_width,
+--     height = popup_height,
+--     style = 'minimal',
+--     border = 'rounded'
+--   })
+-- end)
+
+
+vim.keymap.set('n', '<leader>os', function()
+  local user_home = vim.fn.expand('~'):gsub('\\', '/')
+  vim.cmd('edit ' .. user_home .. '/scratchpad')
+end
+)
+
+vim.keymap.set('n', '<leader>ovs', function()
+  local user_home = vim.fn.expand('~'):gsub('\\', '/')
+  vim.cmd('vsplit ' .. user_home .. '/scratchpad')
+end
+)
+
+vim.keymap.set('n', '<leader>ots', function()
+  local user_home = vim.fn.expand('~'):gsub('\\', '/')
+  vim.cmd('tab split ' .. user_home .. '/scratchpad')
+end
+)
+
+-- set keybind for [o]pening in a new [t]ab the nvim [p]roxy lsp log
+vim.keymap.set('n', '<leader>otp', function()
+  vim.cmd('tab split ' .. nvim_proxy_log_path)
+  -- vim.cmd('OpenLog proxy')
+end)
+
+-- set keybind for [o]pening in a new [t]ab the nvim [p]roxy lsp log
+vim.keymap.set('n', '<leader>ovp', function()
+  vim.cmd('vsplit ' .. nvim_proxy_log_path)
+  -- vim.cmd('OpenLog proxy')
+end)
+
+
+-- set keybind for [o]pening in a new [t]ab the nvim [l]sp log
+vim.keymap.set('n', '<leader>otl', function()
+  vim.cmd('tab split ' .. nvim_lsp_log_path)
+end)
+
 
 -- set [r]eplace [w]ord (rw) to replace the current word with the contents of the yank buffer
 vim.keymap.set('n', 'grw', [["_dwP]])
 -- vim.keymap.set('n', 'B', [[[m0v$%]])
+
+-- Bind Alt-t to :tabnew
+vim.keymap.set({'n', 'x'}, '<M-t>', function()
+  vim.cmd('tabnew')
+end)
+
+
+-- Bind Alt-RightArrow to :tabNext
+vim.keymap.set({'n', 'x'}, '<M-Right>', function()
+  vim.cmd('tabnext')
+end)
+
+
+-- Bind Alt-LeftArrow to :tabprevious
+vim.keymap.set({'n', 'x'}, '<M-Left>', function()
+  vim.cmd('tabprevious')
+end)
+
+
 
 
 
@@ -823,7 +1003,7 @@ require('lazy').setup({
       vim.keymap.set('n', '<leader>ss', builtin.builtin, { desc = '[S]earch [S]elect Telescope' })
       vim.keymap.set({ 'n', 'v' }, '<leader>sw', builtin.grep_string, { desc = '[S]earch current [W]ord' })
       vim.keymap.set('n', '<leader>sg', builtin.live_grep, { desc = '[S]earch by [G]rep' })
-      vim.keymap.set('n', '<leader>sd', builtin.diagnostics, { desc = '[S]earch [D]iagnostics' })
+      vim.keymap.set('n', '<leader>sD', builtin.diagnostics, { desc = '[S]earch [D]iagnostics' })
       vim.keymap.set('n', '<leader>sr', builtin.resume, { desc = '[S]earch [R]esume' })
       vim.keymap.set('n', '<leader>s.', builtin.oldfiles, { desc = '[S]earch Recent Files ("." for repeat)' })
       vim.keymap.set('n', '<leader>sc', builtin.commands, { desc = '[S]earch [C]ommands' })
@@ -937,6 +1117,17 @@ require('lazy').setup({
     end,
   },
 
+  {
+    'remote-development-tools.nvim',
+    dir = '~/Coding/RemoteDevelopmentTools/remote-development-tools.nvim',
+    config = function()
+      require('rdt.lsp_wrapper').setup({
+        keymap = '<leader>wh'
+      })
+    end
+  },
+
+
   -- LSP Plugins
   {
     -- Main LSP Configuration
@@ -950,7 +1141,12 @@ require('lazy').setup({
         ---@module 'mason.settings'
         ---@type MasonSettings
         ---@diagnostic disable-next-line: missing-fields
-        opts = {},
+        opts = {
+          registries = {
+            'github:mason-org/mason-registry',
+            'github:Crashdummyy/mason-registry',
+          }
+        },
       },
       -- Maps LSP server names between nvim-lspconfig and Mason package names.
       'mason-org/mason-lspconfig.nvim',
@@ -1035,68 +1231,79 @@ require('lazy').setup({
             })
 
             vim.api.nvim_create_autocmd('LspDetach', {
+
               group = vim.api.nvim_create_augroup('kickstart-lsp-detach', { clear = true }),
               callback = function(event2)
                 vim.lsp.buf.clear_references()
                 vim.api.nvim_clear_autocmds { group = 'kickstart-lsp-highlight', buffer = event2.buf }
+                -- local proxy_state_file = io.open('/Users/sjber/.remote-development-tools/lsp-proxy-state.json', 'w')
+                -- if proxy_state_file then
+                --   proxy_state_file:write('{"active_projects": []}')
+                --   proxy_state_file:close()
+                -- end
               end,
             })
           end
 
+
+          -- Dead simple wrapper around <C-]> to remap it to Go to Definition
+          vim.keymap.set('n', '<C-]>', vim.lsp.buf.definition, { buffer = event.buf, desc = 'Go to Definition' })
+
+
           -- Wrapper around go to definition for handling fallback for failures in remote case
-          vim.keymap.set('n', '<C-]>', function()
-            local keys = vim.api.nvim_replace_termcodes('<C-]>', true, false, true)
-
-            -- vim.fn.system()
-
-            local ok, err = pcall(function() vim.cmd.normal { args = { keys }, bang = true } end)
-            local missing_path = tostring(err):match 'E429:.*"([^"]+)"'
-
-            if ok then return end
-            -- fallback / logging / context handling here
-
-            -- fallback path when file is not found locally.  Attempt to check if file exists on remote, if so copy it to shared definitions (headers) root
-            if missing_path then
-              if string.find(missing_path, '/Library') == 1 then
-                local env_vars = vim.fn.environ()
-                local fallback_root = env_vars['MAC_CLANGD_DEFINITIONS_LOCAL_ROOT']
-                local fallback_remote_root = env_vars['MAC_CLANGD_DEFINITIONS_REMOTE_ROOT']
-                local fallback_path = fallback_root .. normalize_path(missing_path, '\\')
-                local fallback_remote_path = fallback_remote_root .. normalize_path(missing_path, '/')
-                print('fallback_path: ' .. fallback_path)
-
-                if file_exists(fallback_path) then
-                  vim.cmd('edit ' .. fallback_path)
-                  return
-                end
-
-                local full_pathlen = string.len(missing_path)
-                local rev_fullpath = string.reverse(missing_path)
-                local sep_idx = full_pathlen - string.find(rev_fullpath, '/')
-                -- string.find(string.reverse(missing_path), '/')
-                local missing_path_dir = fallback_root .. string.sub(missing_path, 1, sep_idx)
-
-                print(fallback_remote_path)
-                -- return
-                makedirs(missing_path_dir, true)
-
-                local sys_cmd = 'ssh mac-clangd \'zsh -lc "cp ' .. missing_path .. ' ' .. fallback_remote_path .. '"\''
-                local cmd_output = vim.fn.system(sys_cmd)
-                print(cmd_output)
-
-                vim.cmd('edit ' .. fallback_path)
-                return
-              else
-                print('Invalid remote path: ' .. missing_path)
-                return
-              end
-              return
-            end
-            vim.notify(err, vim.log.levels.WARN)
-            vim.lsp.buf.definition()
-            -- print 'HANDLED ERROR IN GO TO DEFINITION'
-            print(vim.env.MAC_PROJECT_NAME)
-          end, { buffer = event.buf, desc = 'Wrapped tag/LSP definition jump' })
+          -- vim.keymap.set('n', '<C-]>', function()
+          --   local keys = vim.api.nvim_replace_termcodes('<C-]>', true, false, true)
+          --
+          --   -- vim.fn.system()
+          --
+          --   local ok, err = pcall(function() vim.cmd.normal { args = { keys }, bang = true } end)
+          --   local missing_path = tostring(err):match 'E429:.*"([^"]+)"'
+          --
+          --   if ok then return end
+          --   -- fallback / logging / context handling here
+          --
+          --   -- fallback path when file is not found locally.  Attempt to check if file exists on remote, if so copy it to shared definitions (headers) root
+          --   if missing_path then
+          --     if string.find(missing_path, '/Library') == 1 then
+          --       local env_vars = vim.fn.environ()
+          --       local fallback_root = env_vars['MAC_CLANGD_DEFINITIONS_LOCAL_ROOT']
+          --       local fallback_remote_root = env_vars['MAC_CLANGD_DEFINITIONS_REMOTE_ROOT']
+          --       local fallback_path = fallback_root .. normalize_path(missing_path, '\\')
+          --       local fallback_remote_path = fallback_remote_root .. normalize_path(missing_path, '/')
+          --       print('fallback_path: ' .. fallback_path)
+          --
+          --       if file_exists(fallback_path) then
+          --         vim.cmd('edit ' .. fallback_path)
+          --         return
+          --       end
+          --
+          --       local full_pathlen = string.len(missing_path)
+          --       local rev_fullpath = string.reverse(missing_path)
+          --       local sep_idx = full_pathlen - string.find(rev_fullpath, '/')
+          --       -- string.find(string.reverse(missing_path), '/')
+          --       local missing_path_dir = fallback_root .. string.sub(missing_path, 1, sep_idx)
+          --
+          --       print(fallback_remote_path)
+          --       -- return
+          --       makedirs(missing_path_dir, true)
+          --
+          --       local sys_cmd = 'ssh mac-clangd \'zsh -lc "cp ' .. missing_path .. ' ' .. fallback_remote_path .. '"\''
+          --       local cmd_output = vim.fn.system(sys_cmd)
+          --       print(cmd_output)
+          --
+          --       vim.cmd('edit ' .. fallback_path)
+          --       return
+          --     else
+          --       print('Invalid remote path: ' .. missing_path)
+          --       return
+          --     end
+          --     return
+          --   end
+          --   vim.notify(err, vim.log.levels.WARN)
+          --   vim.lsp.buf.definition()
+          --   -- print 'HANDLED ERROR IN GO TO DEFINITION'
+          --   print(vim.env.MAC_PROJECT_NAME)
+          -- end, { buffer = event.buf, desc = 'Wrapped tag/LSP definition jump' })
 
           -- The following code creates a keymap to toggle inlay hints in your
           -- code, if the language server you are using supports them
@@ -1203,20 +1410,6 @@ require('lazy').setup({
 
       ---@type table<string, vim.lsp.Config>
       local servers = {
-        myclangd_proxy = {
-          cmd = (function()
-            local mason_clangd = vim.fn.stdpath 'data' .. '/mason/bin/clangd.cmd'
-            local clangd_bin = vim.uv.fs_stat(mason_clangd) and mason_clangd or 'clangd'
-            local python_exe = 'C:/Python313/python.exe'
-            local my_script_path = 'C:/Users/sjber/Coding/Python/Remote-Xcode-Server/lsp_wrapper.py'
-            local qd_arg = '--query-driver=C:/msys64/mingw64/bin/*'
-            return {python_exe, my_script_path, qd_arg}
-          end)(),
-          filetypes = {'c', 'cpp', 'objc', 'objcpp', 'cuda', 'proto'},
-          root_markers = {'compile_commands.json', '.clangd', '.git', 'compile_flags.txt'}
-        },
-
-
         -- clangd = {
         --   cmd = (function()
         --     local remote_cmd = macos_remote_clangd_cmd()
@@ -1266,7 +1459,7 @@ require('lazy').setup({
         powershell_es = {
           -- Avoid the WindowsApps pwsh alias/package resolution path here:
           -- Neovim's LSP transport can hit EPERM spawning it with stdio pipes.
-          shell = 'C:\\Program Files\\WindowsApps\\Microsoft.PowerShell_7.6.1.0_x64__8wekyb3d8bbwe\\pwsh.exe',
+          shell = 'C:\\Program Files\\WindowsApps\\Microsoft.PowerShell_7.6.2.0_x64__8wekyb3d8bbwe\\pwsh.exe',
           -- mason-lspconfig currently derives this from $MASON; if that env var
           -- is unset on Windows, the server command can become "nil/...".
           bundle_path = vim.fn.stdpath 'data' .. '/mason/packages/powershell-editor-services',
@@ -1313,6 +1506,32 @@ require('lazy').setup({
             Lua = {},
           },
         },
+        -- sourcekit_lsp = {
+        --   cmd = { 'sourcekit-lsp' },
+        --     filetypes = { 'swift' },
+        --     root_markers = {
+        --       '.git',
+        --       'compile_commands.json',
+        --       '.sourcekit-lsp',
+        --       'Package.swift',
+        --     },
+        --     get_language_id = function(_, ftype)
+        --       return ftype
+        --     end,
+        --     capabilities = {
+        --       workspace = {
+        --         didChangeWatchedFiles = {
+        --           dynamicRegistration = true,
+        --         },
+        --       },
+        --       textDocument = {
+        --         diagnostic = {
+        --           dynamicRegistration = true,
+        --           relatedDocumentSupport = true,
+        --         },
+        --       },
+        --     },
+        -- }
       }
 
       -- Ensure the servers and tools above are installed
@@ -1389,6 +1608,12 @@ require('lazy').setup({
         end
       end)
     end,
+  },
+
+  {
+    'seblyng/roslyn.nvim',
+    ft = 'cs',
+    opts = {}
   },
 
   { -- Autoformat
@@ -1636,6 +1861,20 @@ require('lazy').setup({
     end,
   },
 
+  {
+    'boningmaple/mac-clear',
+    name = 'mac-clear',
+    priority = 1002,
+    config = function()
+      require('mac-clear').setup ({
+        theme = 'dark'
+      })
+      -- vim.cmd 'colorscheme mac-clear'
+    end
+
+
+  },
+
   -- Highlight todo, notes, etc in comments
   {
     'folke/todo-comments.nvim',
@@ -1857,6 +2096,52 @@ require('lazy').setup({
       end, {})
     end,
   },
+
+  {
+    "luckasRanarison/nvim-devdocs",
+    dependencies = {
+      "nvim-lua/plenary.nvim",
+      "nvim-telescope/telescope.nvim",
+      "nvim-treesitter/nvim-treesitter",
+    },
+    opts = function()
+      local dir = vim.fn.stdpath('data') .. '/devdocs'
+      vim.fn.mkdir(dir, 'p')
+      return {
+        dir_path = dir
+      }
+
+    end,
+
+    config = function (_, opts)
+      require('nvim-devdocs').setup(opts)
+
+      vim.keymap.set('n', '<leader>sd', function()
+        local ft = vim.bo.filetype
+        local docs = {
+          python = 'python-3.13',
+          javascript = 'javascript',
+          typescript = 'typescript',
+          cpp = 'cpp',
+          c = 'c'
+        }
+
+        local doc = docs[ft]
+        if not doc then
+          vim.notify('No DevDocs mapping for filetype: ' .. ft, vim.log.levels.WARN)
+          return
+        end
+
+        vim.cmd('DevdocsOpen ' .. doc)
+
+      end, { desc = '[S]earch [D]ocumentation for current language' })
+
+    end
+  },
+
+
+
+  
 
   -- The following comments only work if you have downloaded the kickstart repo, not just copy pasted the
   -- init.lua. If you want these files, they are in the repository, so you can just download them and
